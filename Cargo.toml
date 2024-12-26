@@ -1,0 +1,58 @@
+[package]
+name = "fire-sensor"
+version = "0.1.0"
+authors = ["Aron Granberg <aron.granberg@gmail.com>"]
+edition = "2021"
+resolver = "2"
+rust-version = "1.81"
+
+[[bin]]
+name = "fire-sensor"
+harness = false          # do not use the built in cargo test harness -> resolve rust-analyzer errors
+
+[profile.release]
+opt-level = "s"
+# strip = "none"
+strip = false # Automatically strip symbols from the binary.
+lto = true
+# panic = "abort"
+debug = true
+codegen-units = 1
+
+[profile.dev]
+debug = true    # Symbols are nice and they dont increase the size on Flash
+opt-level = "z"
+
+[features]
+default = ["std", "embassy", "esp-idf-svc/native"]
+
+std = ["alloc", "esp-idf-svc/binstart", "esp-idf-svc/std"]
+alloc = ["esp-idf-svc/alloc"]
+nightly = ["esp-idf-svc/nightly"]
+experimental = ["esp-idf-svc/experimental"]
+embassy = [
+    "esp-idf-svc/embassy-sync",
+]
+
+[dependencies]
+log = { version = "0.4", default-features = false, features = [] }
+esp-idf-svc = { version = "0.51", default-features = false }
+thiserror = "2.0"
+serde = { version = "*", features = ["derive"] }
+tokio = { version = "1", features = ["rt", "macros", "time"] }
+sync_common = { path = "../sync_common" }
+embassy-futures = "0.1"
+brevduva = { git = "https://github.com/HalfVoxel/brevduva.git", features = [
+    "embedded",
+] }
+ordered-float = { version = "5.1", features = ["serde"] }
+embedded-svc = { version = "0.28", default-features = false, features = ["std", "log"] }
+ota_flasher = { path = "../ota_flasher", features = ["embedded"] }
+chrono = { version = "0.4", features = ["serde"] }
+embedded-hal = "1.0.0"
+onewire = "0.4.0"
+
+
+[build-dependencies]
+embuild = "0.33.1"
+chrono = "0.4"

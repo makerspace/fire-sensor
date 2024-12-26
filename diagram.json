@@ -1,0 +1,44 @@
+{
+    "version": 1,
+    "editor": "wokwi",
+    "author": "Aron Granberg <aron.granberg@gmail.com>",
+    "parts": [
+        {
+            "type": "board-esp32-devkit-c-v4",
+            "id": "esp",
+            "top": 0.59,
+            "left": 0.67,
+            "attrs": {
+                "flashSize": "16"
+            }
+        },
+{
+      "type": "wokwi-led",
+      "id": "led1",
+      "top": 63.6,
+      "left": 128.6,
+      "attrs": { "color": "red", "flip": "1" }
+    }
+    ],
+    "connections": [
+        [
+            "esp:TX",
+            "$serialMonitor:RX",
+            "",
+            []
+        ],
+        [
+            "esp:RX",
+            "$serialMonitor:TX",
+            "",
+            []
+        ],
+	[ "esp:5", "esp:GND.2", "green", [ "h14.44", "v-48" ] ],
+[ "led1:A", "esp:17", "green", [ "v0" ] ],
+[ "esp:GND.2", "led1:C", "black", [ "h0" ] ]
+    ],
+    "serialMonitor": {
+        "display": "terminal",
+        "convertEol": true
+    }
+}

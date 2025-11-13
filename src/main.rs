@@ -13,14 +13,13 @@ use esp_idf_svc::{
             attenuation::DB_11,
             oneshot::{config::AdcChannelConfig, AdcChannelDriver},
         },
-        gpio::{GpioError, PinDriver, Pull},
+        gpio::{GpioError, Level, OutputPin, PinDriver, Pull},
         ledc::{config::TimerConfig, LedcDriver, LedcTimerDriver},
         prelude::*,
     },
     http::{client::EspHttpConnection, Method},
     nvs::EspDefaultNvsPartition,
     ota::EspOta,
-    sntp::EspSntp,
     sys::EspError,
 };
 use log::{error, info, warn};
@@ -35,9 +34,10 @@ use wifi::start_wifi;
 use wokwi::check_is_wokwi;
 
 const MQTT_HOST: &str = "mqtt://arongranberg.com:1883";
-const MQTT_CLIENT_ID: &str = "fire_sensor";
+const MQTT_CLIENT_ID: &str = "dust_collector";
 const MQTT_USERNAME: &str = "wakeup_alarm";
 const MQTT_PASSWORD: &str = "xafzz25nomehasff";
+const NUM_GATES: usize = 12;
 
 const PRESSURE_SENSOR_TRIGGERED_URL: &str =
     "https://api.makerspace.se/events/pressure_sensor_triggered";
@@ -119,6 +119,7 @@ fn find_onewire_device<
     None
 }
 
+/// Driver for a DS18B20 temperature sensor on a OneWire bus
 struct TemperatureSensor<
     T: embedded_hal::digital::OutputPin<Error = GpioError>
         + embedded_hal::digital::InputPin<Error = GpioError>,
@@ -172,6 +173,52 @@ impl<
             .read_temperature(&mut self.wire, &mut self.delay)
             .unwrap();
         Some(temperature)
+    }
+}
+
+/// Driver for a 16-channel digital multiplexer
+/// Like the cd74hc4067
+struct Multiplexer16<T: embedded_hal::digital::OutputPin, I: embedded_hal::digital::InputPin> {
+    selector_pins: [T; 4],
+    data_pin: I,
+    delay: esp_idf_svc::hal::delay::Ets,
+}
+
+impl<
+        T: embedded_hal::digital::OutputPin<Error = E>,
+        I: embedded_hal::digital::InputPin<Error = E>,
+        E,
+    > Multiplexer16<T, I>
+{
+    fn new(selector_pins: [T; 4], data_pin: I, delay: esp_idf_svc::hal::delay::Ets) -> Self {
+        Self {
+            selector_pins,
+            data_pin,
+            delay,
+        }
+    }
+
+    fn select_channel(&mut self, channel: u8) -> Result<(), E> {
+        for (i, pin) in self.selector_pins.iter_mut().enumerate() {
+            if (channel & (1 << i)) != 0 {
+                pin.set_high()?;
+            } else {
+                pin.set_low()?;
+            }
+        }
+        Ok(())
+    }
+
+    fn read_data(&mut self) -> Result<bool, E> {
+        self.data_pin.is_high()
+    }
+
+    fn channel_is_high(&mut self, channel: u8) -> Result<bool, E> {
+        self.select_channel(channel)?;
+        // The multiplexer should settle in 6ns or so, which is smaller than even the ESP32's instruction latency.
+        // But just because we're paranoid, add a tiny delay here.
+        self.delay.delay_us(1);
+        self.read_data().map_err(|e| e.into())
     }
 }
 
@@ -229,19 +276,6 @@ async fn post_url(url: &'static str) -> Result<(), PostError> {
 }
 
 async fn async_main() -> Result<(), EspError> {
-    // Temperature sensor: DS18B20
-    // GND
-    // VCC (3.3V)
-    // Data: GPIO4 with 4.7k pull-up to VCC
-    //
-    // Dust level sensor: relay
-    // 24V
-    // GPIO5, with pull-down to GND, via logic-level converter from 24V
-    //
-    // Pressure sensor (for when fire sensor triggers): relay
-    // 24V
-    // GPIO18, with pull-down to GND, via logic-level converter from 24V
-
     let peripherals = Peripherals::take()?;
     let sys_loop = EspSystemEventLoop::take()?;
     let nvs = EspDefaultNvsPartition::take()?;
@@ -256,21 +290,18 @@ async fn async_main() -> Result<(), EspError> {
             .resolution(esp_idf_svc::hal::ledc::Resolution::Bits17),
     )?;
 
-    let pressure_sensor_pin = peripherals.pins.gpio16;
-    let dust_sensor_pin = peripherals.pins.gpio13;
     let temperature_sensor_pin = peripherals.pins.gpio23;
-    let dust_sensor_analog_pin = peripherals.pins.gpio27;
+    let dust_sensor_analog_pin = peripherals.pins.gpio13;
 
     let mut temperature_sensor =
         TemperatureSensor::new(PinDriver::input_output_od(temperature_sensor_pin)?).unwrap();
 
-    let mut pressure_sensor = PinDriver::input(pressure_sensor_pin)?;
-    pressure_sensor.set_pull(Pull::Up)?;
-
-    let mut dust_sensor_switch = PinDriver::input(dust_sensor_pin)?;
-    dust_sensor_switch.set_pull(Pull::Up)?;
-
     let adc = esp_idf_svc::hal::adc::oneshot::AdcDriver::new(peripherals.adc2)?;
+
+    let low_pressure_signal_channel = 12;
+    let dust_warning_signal_1_channel = 13;
+    let dust_warning_signal_2_channel = 14;
+    let main_power_relay_channel = 15;
 
     let mut dust_sensor_analog = AdcChannelDriver::new(
         &adc,
@@ -280,6 +311,30 @@ async fn async_main() -> Result<(), EspError> {
             ..Default::default()
         },
     )?;
+
+    let mut multiplexer_data_pin = PinDriver::input_output(peripherals.pins.gpio33)?;
+
+    // Gate signals are GND / Floating, so we need a pull-up on data pin.
+    // The multiplexer also reads various relay signals that are active when high, but they all have stronger external pull-downs.
+    // The ESP32 internal pull-up is weak (around 10k-100k), but the external pull-downs are stronger (1.5k).
+    multiplexer_data_pin.set_pull(Pull::Up)?;
+
+    let mut multiplexer = Multiplexer16::new(
+        [
+            PinDriver::output(peripherals.pins.gpio14.downgrade_output())?,
+            PinDriver::output(peripherals.pins.gpio27.downgrade_output())?,
+            PinDriver::output(peripherals.pins.gpio26.downgrade_output())?,
+            PinDriver::output(peripherals.pins.gpio25.downgrade_output())?,
+        ],
+        multiplexer_data_pin,
+        esp_idf_svc::hal::delay::Ets,
+    );
+
+    // Main power relay control pin.
+    // Low or Floating  = Machine Off
+    // High = Machine On (unless some other safety relay prevents it from running)
+    // Note: Has external pull-down to GND
+    let mut power_controller_pin = PinDriver::output(peripherals.pins.gpio12)?;
 
     let mut debug_led = DebugLed::new(LedcDriver::new(
         peripherals.ledc.channel1,
@@ -297,13 +352,11 @@ async fn async_main() -> Result<(), EspError> {
     )
     .await;
 
-    // convert mac to string
+    // Convert mac to string
     let mac_str = format!(
         "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
         mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]
     );
-
-    let ntp = EspSntp::new_default().unwrap();
 
     let device_id = format!("{MQTT_CLIENT_ID} {mac_str}");
     info!("Device ID: {}", device_id);
@@ -322,7 +375,7 @@ async fn async_main() -> Result<(), EspError> {
 
     let temperature_container = storage
         .add_container_with_mode(
-            &format!("fire_sensor/{device_id}/temperature"),
+            &format!("dust_collector/{device_id}/temperature"),
             Option::<NotNan<f32>>::None,
             SerializationFormat::Json,
             ReadWriteMode::Driven,
@@ -332,7 +385,7 @@ async fn async_main() -> Result<(), EspError> {
 
     let water_pressure_sensor_container = storage
         .add_container_with_mode(
-            &format!("fire_sensor/{device_id}/water_pressure"),
+            &format!("dust_collector/{device_id}/water_pressure"),
             Option::<bool>::None,
             SerializationFormat::Json,
             ReadWriteMode::Driven,
@@ -340,9 +393,29 @@ async fn async_main() -> Result<(), EspError> {
         .await
         .unwrap();
 
-    let dust_sensor_switch_container = storage
+    let dust_sensor_warning_1_container = storage
         .add_container_with_mode(
-            &format!("fire_sensor/{device_id}/dust_level_switch"),
+            &format!("dust_collector/{device_id}/dust_level_warning_1"),
+            Option::<bool>::None,
+            SerializationFormat::Json,
+            ReadWriteMode::Driven,
+        )
+        .await
+        .unwrap();
+
+    let dust_sensor_warning_2_container = storage
+        .add_container_with_mode(
+            &format!("dust_collector/{device_id}/dust_level_warning_2"),
+            Option::<bool>::None,
+            SerializationFormat::Json,
+            ReadWriteMode::Driven,
+        )
+        .await
+        .unwrap();
+
+    let main_power_relay_container = storage
+        .add_container_with_mode(
+            &format!("dust_collector/{device_id}/machine_running"),
             Option::<bool>::None,
             SerializationFormat::Json,
             ReadWriteMode::Driven,
@@ -352,7 +425,7 @@ async fn async_main() -> Result<(), EspError> {
 
     let dust_sensor_level_container = storage
         .add_container_with_mode(
-            &format!("fire_sensor/{device_id}/dust_level"),
+            &format!("dust_collector/{device_id}/dust_level"),
             Option::<u16>::None,
             SerializationFormat::Json,
             ReadWriteMode::Driven,
@@ -360,25 +433,52 @@ async fn async_main() -> Result<(), EspError> {
         .await
         .unwrap();
 
+    let powered_on_too_long_container = storage
+        .add_container_with_mode(
+            &format!("dust_collector/{device_id}/powered_on_too_long"),
+            Option::<bool>::None,
+            SerializationFormat::Json,
+            ReadWriteMode::Driven,
+        )
+        .await
+        .unwrap();
+
+    let mut gate_containers: Vec<std::sync::Arc<brevduva::SyncedContainer<Option<bool>>>> = vec![];
+    for i in 0..NUM_GATES {
+        gate_containers.push(
+            storage
+                .add_container_with_mode(
+                    &format!("dust_collector/{device_id}/gates/{i}/open"),
+                    Option::<bool>::None,
+                    SerializationFormat::Json,
+                    ReadWriteMode::Driven,
+                )
+                .await
+                .unwrap(),
+        );
+    }
+
+    // Allow over-the-air updates
+    // It's very convenient to be able to update the firmware without plugging in a cable.
+    // You will need to be on the same network as the device to perform the update, however.
     ota_flasher::downloader::initialize_ota(&storage, &device_id, env!("BUILD_ID")).await;
 
+    // Mark the current boot as successful
+    // If the device fails to reach this point during the first boot after flashing OTA, it will revert to the previous firmware.
     successful_boot();
 
     debug_led.blink(1, Duration::from_millis(100)).await?;
 
-    // Wait until we have current time from network
-    while ntp.get_sync_status() != esp_idf_svc::sntp::SyncStatus::Completed {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-
-    debug_led.blink(2, Duration::from_millis(40)).await?;
-
+    // This is good to do, but won't actually block us as all our containers are Driven.
     storage.wait_for_sync().await;
 
     debug_led.blink(10, Duration::from_millis(20)).await?;
 
     let mut last_time_pressure_sensor_value_unchanged = Instant::now();
-    let mut pressure_sensor_last = pressure_sensor.is_high();
+    let mut last_time_all_gates_closed = Instant::now();
+    let mut pressure_sensor_last = multiplexer
+        .channel_is_high(low_pressure_signal_channel)
+        .unwrap();
 
     loop {
         let t = temperature_sensor.measure().unwrap() as f32 / 16.0;
@@ -388,32 +488,92 @@ async fn async_main() -> Result<(), EspError> {
 
         info!("Temperature: {:.2} °C", temperature);
 
+        // Read multiplexer channels
+        let pressure_low = multiplexer
+            .channel_is_high(low_pressure_signal_channel)
+            .unwrap();
+        let dust_sensor_warning_1 = multiplexer
+            .channel_is_high(dust_warning_signal_1_channel)
+            .unwrap();
+        let dust_sensor_warning_2 = multiplexer
+            .channel_is_high(dust_warning_signal_2_channel)
+            .unwrap();
+        let main_power_relay = multiplexer
+            .channel_is_high(main_power_relay_channel)
+            .unwrap();
+
+        let mut gates_open = [false; NUM_GATES];
+        for (i, open) in gates_open.iter_mut().enumerate() {
+            // Gates are open when low. The input pin has an internal pull-up resistor.
+            *open = !multiplexer.channel_is_high(i as u8).unwrap();
+        }
+
+        // Read dust sensor analog value. This is an approximate distance value. A low value means more dust.
+        let dust_sensor_level: u16 = dust_sensor_analog.read().unwrap_or(0);
+
+        let any_gate_open = gates_open.iter().any(|&open| open);
+        if !any_gate_open {
+            last_time_all_gates_closed = Instant::now();
+        }
+
+        // High temperature safety cut-off
+        // The temperature sensor is right above the dust bin, below the filters.
+        let temperature_too_high = temperature > 60.0;
+
+        // If the machine has been powered on for a long time, cut the power automatically.
+        // This will require closing all gates to reset the system (or a power cycle).
+        let powered_on_too_long =
+            last_time_all_gates_closed.elapsed() > Duration::from_secs(30 * 60);
+
+        // Update brevduva containers
         temperature_container
             .set(Some(NotNan::new(temperature).unwrap()))
             .await;
 
-        let pressure_sensor_value = pressure_sensor.is_low();
         water_pressure_sensor_container
-            .set(Some(pressure_sensor_value))
+            .set(Some(!pressure_low))
             .await;
 
-        let dust_sensor_value = dust_sensor_switch.is_low();
-        dust_sensor_switch_container
-            .set(Some(dust_sensor_value))
+        dust_sensor_warning_1_container
+            .set(Some(dust_sensor_warning_1))
             .await;
 
-        let dust_sensor_level: u16 = dust_sensor_analog.read().unwrap_or(0);
+        dust_sensor_warning_2_container
+            .set(Some(dust_sensor_warning_2))
+            .await;
+
+        main_power_relay_container.set(Some(main_power_relay)).await;
+
         dust_sensor_level_container
             .set(Some(dust_sensor_level))
             .await;
 
-        if pressure_sensor_value != pressure_sensor_last {
+        powered_on_too_long_container
+            .set(Some(powered_on_too_long))
+            .await;
+
+        for (gate_container, &open) in gate_containers.iter().zip(gates_open.iter()) {
+            gate_container.set(Some(open)).await;
+        }
+
+        // Control power to the machine.
+        // Note: dust_sensor_warning_2 and pressure_low already use external relays that will cut the power if needed.
+        power_controller_pin.set_level(if temperature_too_high || powered_on_too_long {
+            Level::Low
+        } else if any_gate_open {
+            Level::High
+        } else {
+            Level::Low
+        })?;
+
+        // Check for pressure sensor state change
+        if pressure_low != pressure_sensor_last {
             // Delay to avoid multiple triggers due to sensor bouncing
             if last_time_pressure_sensor_value_unchanged.elapsed() > Duration::from_millis(500) {
-                pressure_sensor_last = pressure_sensor_value;
+                pressure_sensor_last = pressure_low;
                 last_time_pressure_sensor_value_unchanged = Instant::now();
 
-                if pressure_sensor_value {
+                if pressure_low {
                     warn!(
                         "Pressure sensor triggered! Temperature: {:.2} °C",
                         temperature
@@ -434,6 +594,6 @@ async fn async_main() -> Result<(), EspError> {
             last_time_pressure_sensor_value_unchanged = Instant::now();
         }
 
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
     }
 }

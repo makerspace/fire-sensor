@@ -109,7 +109,7 @@ impl<'a> WifiLoop<'a> {
             info!("Connecting to Wi-Fi...");
             if let Err(e) = Self::try_connect(wifi).await {
                 match e.code() {
-                    ESP_ERR_TIMEOUT => {
+                    x if x == ESP_ERR_TIMEOUT => {
                         log::error!(
                             "Timeout when connecting to wifi. Trying again in a few seconds..."
                         );

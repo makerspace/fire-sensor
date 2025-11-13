@@ -54,10 +54,14 @@ It will log the following data to the given MQTT topics:
 ```
 sync/devices/{device_id}/status: JSON string, "online" | "offline". Uses MQTT last-will-and-testament to set the status to "offline" if the device goes down.
 sync/devices/{device_id}/version: JSON string, "#{git hash} {timestamp}". The git hash of the commit the firmware was last flashed with, and the timestamp of the last build.
-sync/fire_sensor/{device_id}/temperature: Option<f32>, the temperature in degrees Celcius as given by the attached temperature sensor.
-sync/fire_sensor/{device_id}/water_pressure: Option<bool>, true when there's positive pressure.
-sync/fire_sensor/{device_id}/dust_level_switch: Option<bool>, true when the dust level is too high.
-sync/fire_sensor/{device_id}/dust_level: Option<u16>, sensor value from the ultrasonic distance sensor.
+sync/dust_collector/{device_id}/temperature: Option<f32>, the temperature in degrees Celcius as given by the attached temperature sensor.
+sync/dust_collector/{device_id}/water_pressure: Option<bool>, true when there's positive pressure.
+sync/dust_collector/{device_id}/dust_level: Option<u16>, sensor value from the ultrasonic distance sensor.
+sync/dust_collector/{device_id}/dust_level_warning_1: Option<bool>, true when the dust level is too high.
+sync/dust_collector/{device_id}/dust_level_warning_2: Option<bool>, true when the dust level is very high and the machine will be turned off.
+sync/dust_collector/{device_id}/machine_running: Option<bool>, true when the machine is running.
+sync/dust_collector/{device_id}/powered_on_too_long: Option<bool>, true when the gates have been opened for too long, and the machine has been turned off automatically.
+sync/dust_collector/{device_id}/gates/N/open: Option<bool>, true when the gate is open
 ```
 
 Where `device_id` is `fire_sensor {MAC ADDRESS OF ESP32}`.

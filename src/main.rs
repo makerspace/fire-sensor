@@ -13,8 +13,9 @@ use esp_idf_svc::{
             attenuation::DB_11,
             oneshot::{config::AdcChannelConfig, AdcChannelDriver},
         },
-        gpio::{GpioError, Level, OutputPin, PinDriver, Pull},
+        gpio::{GpioError, IOPin, Level, OutputPin, Pin, PinDriver, Pull},
         ledc::{config::TimerConfig, LedcDriver, LedcTimerDriver},
+        peripheral::Peripheral,
         prelude::*,
     },
     http::{client::EspHttpConnection, Method},
@@ -40,8 +41,8 @@ const MQTT_PASSWORD: &str = "xafzz25nomehasff";
 const NUM_GATES: usize = 12;
 
 const PRESSURE_SENSOR_TRIGGERED_URL: &str =
-    "https://api.makerspace.se/events/pressure_sensor_triggered";
-const PRESSURE_SENSOR_RESET_URL: &str = "https://api.makerspace.se/events/pressure_sensor_reset";
+    "https://api.makerspace.se/alerts/pressure_sensor_triggered";
+const PRESSURE_SENSOR_RESET_URL: &str = "https://api.makerspace.se/alerts/pressure_sensor_reset";
 
 fn main() {
     init_esp();
@@ -97,7 +98,28 @@ impl DebugLed {
 
 fn successful_boot() {
     let mut ota = EspOta::new().expect("obtain OTA instance");
-    ota.mark_running_slot_valid().expect("mark app as valid");
+    // This will fail when flashing the app the normal way (not OTA), so we ignore the result.
+    ota.mark_running_slot_valid().ok();
+}
+
+enum OneWireError {
+    DeviceNotFound,
+    Onewire(onewire::Error<GpioError>),
+}
+
+impl Debug for OneWireError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OneWireError::DeviceNotFound => write!(f, "OneWire device not found"),
+            OneWireError::Onewire(e) => write!(f, "OneWire error: {:?}", e),
+        }
+    }
+}
+
+impl From<onewire::Error<GpioError>> for OneWireError {
+    fn from(error: onewire::Error<GpioError>) -> Self {
+        OneWireError::Onewire(error)
+    }
 }
 
 fn find_onewire_device<
@@ -107,16 +129,16 @@ fn find_onewire_device<
     wire: &mut OneWire<T>,
     family_code: u8,
     delay: &mut impl DelayNs,
-) -> Option<onewire::Device> {
+) -> Result<onewire::Device, OneWireError> {
     let mut search = DeviceSearch::new();
-    while let Some(device) = wire.search_next(&mut search, delay).unwrap() {
+    while let Some(device) = wire.search_next(&mut search, delay)? {
         if device.address[0] == family_code {
-            return Some(device);
+            return Ok(device);
         } else {
             // Not the right family code, continue searching
         }
     }
-    None
+    Err(OneWireError::DeviceNotFound)
 }
 
 /// Driver for a DS18B20 temperature sensor on a OneWire bus
@@ -134,20 +156,14 @@ impl<
             + embedded_hal::digital::InputPin<Error = GpioError>,
     > TemperatureSensor<T>
 {
-    fn new(one: T) -> Result<Self, &'static str> {
+    fn new(one: T) -> Result<Self, OneWireError> {
         let mut wire = OneWire::new(one, false);
 
         let mut delay = esp_idf_svc::hal::delay::Ets;
-        if wire.reset(&mut delay).is_err() {
-            // missing pullup or error on line
-            return Err(
-                "Failed to initialize temperature sensor. Check wiring and pull-up resistor.",
-            );
-        }
+        wire.reset(&mut delay)?;
 
         // Search for devices
-        let device = find_onewire_device(&mut wire, onewire::ds18b20::FAMILY_CODE, &mut delay)
-            .ok_or("No DS18B20 temperature sensor found on the OneWire bus.")?;
+        let device = find_onewire_device(&mut wire, onewire::ds18b20::FAMILY_CODE, &mut delay)?;
 
         let ds18b20 = onewire::DS18B20::new(device).unwrap();
         return Ok(TemperatureSensor {
@@ -294,7 +310,13 @@ async fn async_main() -> Result<(), EspError> {
     let dust_sensor_analog_pin = peripherals.pins.gpio13;
 
     let mut temperature_sensor =
-        TemperatureSensor::new(PinDriver::input_output_od(temperature_sensor_pin)?).unwrap();
+        match TemperatureSensor::new(PinDriver::input_output_od(temperature_sensor_pin)?) {
+            Ok(sensor) => Some(sensor),
+            Err(e) => {
+                error!("Failed to initialize temperature sensor: {:?}", e);
+                None
+            }
+        };
 
     let adc = esp_idf_svc::hal::adc::oneshot::AdcDriver::new(peripherals.adc2)?;
 
@@ -312,7 +334,7 @@ async fn async_main() -> Result<(), EspError> {
         },
     )?;
 
-    let mut multiplexer_data_pin = PinDriver::input_output(peripherals.pins.gpio33)?;
+    let mut multiplexer_data_pin = PinDriver::input(peripherals.pins.gpio33)?;
 
     // Gate signals are GND / Floating, so we need a pull-up on data pin.
     // The multiplexer also reads various relay signals that are active when high, but they all have stronger external pull-downs.
@@ -481,12 +503,14 @@ async fn async_main() -> Result<(), EspError> {
         .unwrap();
 
     loop {
-        let t = temperature_sensor.measure().unwrap() as f32 / 16.0;
-        const M: f32 = 1.0; // Example slope
-        const B: f32 = 0.0; // Example intercept
-        let temperature = M * t + B;
+        let temperature = temperature_sensor
+            .as_mut()
+            .and_then(|s| s.measure().map(|v| v as f32 / 16.0));
 
-        info!("Temperature: {:.2} °C", temperature);
+        match temperature {
+            Some(t) => info!("Temperature: {:.2} °C", t),
+            None => info!("Temperature: N/A"),
+        }
 
         // Read multiplexer channels
         let pressure_low = multiplexer
@@ -518,7 +542,7 @@ async fn async_main() -> Result<(), EspError> {
 
         // High temperature safety cut-off
         // The temperature sensor is right above the dust bin, below the filters.
-        let temperature_too_high = temperature > 60.0;
+        let temperature_too_high = temperature.map(|t| t > 60.0).unwrap_or(false);
 
         // If the machine has been powered on for a long time, cut the power automatically.
         // This will require closing all gates to reset the system (or a power cycle).
@@ -527,7 +551,7 @@ async fn async_main() -> Result<(), EspError> {
 
         // Update brevduva containers
         temperature_container
-            .set(Some(NotNan::new(temperature).unwrap()))
+            .set(temperature.map(|t| NotNan::new(t).unwrap()))
             .await;
 
         water_pressure_sensor_container
@@ -576,7 +600,7 @@ async fn async_main() -> Result<(), EspError> {
                 if pressure_low {
                     warn!(
                         "Pressure sensor triggered! Temperature: {:.2} °C",
-                        temperature
+                        temperature.map(|t| t).unwrap_or(f32::NAN)
                     );
 
                     match post_url(PRESSURE_SENSOR_TRIGGERED_URL).await {

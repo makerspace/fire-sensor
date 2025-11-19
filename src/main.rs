@@ -13,7 +13,7 @@ use esp_idf_svc::{
             attenuation::DB_11,
             oneshot::{config::AdcChannelConfig, AdcChannelDriver},
         },
-        gpio::{GpioError, IOPin, Level, OutputPin, Pin, PinDriver, Pull},
+        gpio::{GpioError, IOPin, InputPin, Level, OutputPin, Pin, PinDriver, Pull},
         ledc::{config::TimerConfig, LedcDriver, LedcTimerDriver},
         peripheral::Peripheral,
         prelude::*,
@@ -38,7 +38,6 @@ const MQTT_HOST: &str = "mqtt://arongranberg.com:1883";
 const MQTT_CLIENT_ID: &str = "dust_collector";
 const MQTT_USERNAME: &str = "wakeup_alarm";
 const MQTT_PASSWORD: &str = "xafzz25nomehasff";
-const NUM_GATES: usize = 12;
 
 const PRESSURE_SENSOR_TRIGGERED_URL: &str =
     "https://api.makerspace.se/alerts/pressure_sensor_triggered";
@@ -299,15 +298,23 @@ async fn async_main() -> Result<(), EspError> {
 
     let is_wokwi_simulator = check_is_wokwi()?;
 
-    let ledc_driver = LedcTimerDriver::new(
-        peripherals.ledc.timer2,
-        &TimerConfig::default()
-            .frequency(610.Hz().into())
-            .resolution(esp_idf_svc::hal::ledc::Resolution::Bits17),
-    )?;
-
+    // Pin assignments
     let temperature_sensor_pin = peripherals.pins.gpio23;
     let dust_sensor_analog_pin = peripherals.pins.gpio13;
+    let power_controller_pin = peripherals.pins.gpio12;
+    let debug_led_pin = peripherals.pins.gpio2;
+    let multiplexer_data_pin = peripherals.pins.gpio33;
+    let multiplexer_selector_pin_0 = peripherals.pins.gpio14;
+    let multiplexer_selector_pin_1 = peripherals.pins.gpio27;
+    let multiplexer_selector_pin_2 = peripherals.pins.gpio26;
+    let multiplexer_selector_pin_3 = peripherals.pins.gpio25;
+
+    // Multiplexer channel assignments
+    let low_pressure_signal_channel = 0;
+    let dust_warning_signal_1_channel = 1;
+    let dust_warning_signal_2_channel = 2;
+    let main_power_relay_channel = 3;
+    let dust_port_channels = 4..16;
 
     let mut temperature_sensor =
         match TemperatureSensor::new(PinDriver::input_output_od(temperature_sensor_pin)?) {
@@ -320,11 +327,6 @@ async fn async_main() -> Result<(), EspError> {
 
     let adc = esp_idf_svc::hal::adc::oneshot::AdcDriver::new(peripherals.adc2)?;
 
-    let low_pressure_signal_channel = 12;
-    let dust_warning_signal_1_channel = 13;
-    let dust_warning_signal_2_channel = 14;
-    let main_power_relay_channel = 15;
-
     let mut dust_sensor_analog = AdcChannelDriver::new(
         &adc,
         dust_sensor_analog_pin,
@@ -334,21 +336,21 @@ async fn async_main() -> Result<(), EspError> {
         },
     )?;
 
-    let mut multiplexer_data_pin = PinDriver::input(peripherals.pins.gpio33)?;
+    let mut multiplexer_data_driver = PinDriver::input(multiplexer_data_pin)?;
 
     // Gate signals are GND / Floating, so we need a pull-up on data pin.
     // The multiplexer also reads various relay signals that are active when high, but they all have stronger external pull-downs.
     // The ESP32 internal pull-up is weak (around 10k-100k), but the external pull-downs are stronger (1.5k).
-    multiplexer_data_pin.set_pull(Pull::Up)?;
+    multiplexer_data_driver.set_pull(Pull::Up)?;
 
     let mut multiplexer = Multiplexer16::new(
         [
-            PinDriver::output(peripherals.pins.gpio14.downgrade_output())?,
-            PinDriver::output(peripherals.pins.gpio27.downgrade_output())?,
-            PinDriver::output(peripherals.pins.gpio26.downgrade_output())?,
-            PinDriver::output(peripherals.pins.gpio25.downgrade_output())?,
+            PinDriver::output(multiplexer_selector_pin_0.downgrade_output())?,
+            PinDriver::output(multiplexer_selector_pin_1.downgrade_output())?,
+            PinDriver::output(multiplexer_selector_pin_2.downgrade_output())?,
+            PinDriver::output(multiplexer_selector_pin_3.downgrade_output())?,
         ],
-        multiplexer_data_pin,
+        multiplexer_data_driver,
         esp_idf_svc::hal::delay::Ets,
     );
 
@@ -356,12 +358,19 @@ async fn async_main() -> Result<(), EspError> {
     // Low or Floating  = Machine Off
     // High = Machine On (unless some other safety relay prevents it from running)
     // Note: Has external pull-down to GND
-    let mut power_controller_pin = PinDriver::output(peripherals.pins.gpio12)?;
+    let mut power_controller_driver = PinDriver::output(power_controller_pin)?;
+
+    let ledc_driver = LedcTimerDriver::new(
+        peripherals.ledc.timer2,
+        &TimerConfig::default()
+            .frequency(610.Hz().into())
+            .resolution(esp_idf_svc::hal::ledc::Resolution::Bits17),
+    )?;
 
     let mut debug_led = DebugLed::new(LedcDriver::new(
         peripherals.ledc.channel1,
         &ledc_driver,
-        peripherals.pins.gpio2,
+        debug_led_pin,
     )?);
     debug_led.blink(4, Duration::from_millis(50)).await?;
 
@@ -399,6 +408,16 @@ async fn async_main() -> Result<(), EspError> {
         .add_container_with_mode(
             &format!("dust_collector/{device_id}/temperature"),
             Option::<NotNan<f32>>::None,
+            SerializationFormat::Json,
+            ReadWriteMode::Driven,
+        )
+        .await
+        .unwrap();
+
+    let temperature_warning_container = storage
+        .add_container_with_mode(
+            &format!("dust_collector/{device_id}/temperature_warning"),
+            Option::<bool>::None,
             SerializationFormat::Json,
             ReadWriteMode::Driven,
         )
@@ -466,7 +485,7 @@ async fn async_main() -> Result<(), EspError> {
         .unwrap();
 
     let mut gate_containers: Vec<std::sync::Arc<brevduva::SyncedContainer<Option<bool>>>> = vec![];
-    for i in 0..NUM_GATES {
+    for (i, _) in dust_port_channels.clone().enumerate() {
         gate_containers.push(
             storage
                 .add_container_with_mode(
@@ -502,6 +521,8 @@ async fn async_main() -> Result<(), EspError> {
         .channel_is_high(low_pressure_signal_channel)
         .unwrap();
 
+    let mut in_force_powered_off_state = false;
+
     loop {
         let temperature = temperature_sensor
             .as_mut()
@@ -526,11 +547,11 @@ async fn async_main() -> Result<(), EspError> {
             .channel_is_high(main_power_relay_channel)
             .unwrap();
 
-        let mut gates_open = [false; NUM_GATES];
-        for (i, open) in gates_open.iter_mut().enumerate() {
-            // Gates are open when low. The input pin has an internal pull-up resistor.
-            *open = !multiplexer.channel_is_high(i as u8).unwrap();
-        }
+        // Gates are open when low. The input pin has an internal pull-up resistor.
+        let gates_open = dust_port_channels
+            .clone()
+            .map(|channel| !multiplexer.channel_is_high(channel).unwrap())
+            .collect::<Vec<_>>();
 
         // Read dust sensor analog value. This is an approximate distance value. A low value means more dust.
         let dust_sensor_level: u16 = dust_sensor_analog.read().unwrap_or(0);
@@ -542,16 +563,37 @@ async fn async_main() -> Result<(), EspError> {
 
         // High temperature safety cut-off
         // The temperature sensor is right above the dust bin, below the filters.
-        let temperature_too_high = temperature.map(|t| t > 60.0).unwrap_or(false);
+        let temperature_too_high = temperature.map(|t| t > 60.0);
 
         // If the machine has been powered on for a long time, cut the power automatically.
         // This will require closing all gates to reset the system (or a power cycle).
         let powered_on_too_long =
             last_time_all_gates_closed.elapsed() > Duration::from_secs(30 * 60);
 
+        let force_powered_off_internal =
+            temperature_too_high.unwrap_or(false) || powered_on_too_long;
+
+        // Note: dust_sensor_warning_2 and pressure_low already use external relays that will cut the power if needed.
+        // But we still want to track the forced powered off state here, and will also keep the machine powered off
+        // until all gates have been closed, even if the external relays have reset.
+        let force_powered_off_external = dust_sensor_warning_2 || pressure_low;
+        let force_powered_off = force_powered_off_internal || force_powered_off_external;
+
+        in_force_powered_off_state |= force_powered_off;
+
+        if in_force_powered_off_state && !force_powered_off && !any_gate_open {
+            // Reset the forced powered off state when all conditions are cleared and all gates are closed.
+            in_force_powered_off_state = false;
+            info!("Exiting forced powered off state");
+        }
+
         // Update brevduva containers
         temperature_container
             .set(temperature.map(|t| NotNan::new(t).unwrap()))
+            .await;
+
+        temperature_warning_container
+            .set(temperature_too_high)
             .await;
 
         water_pressure_sensor_container
@@ -581,8 +623,7 @@ async fn async_main() -> Result<(), EspError> {
         }
 
         // Control power to the machine.
-        // Note: dust_sensor_warning_2 and pressure_low already use external relays that will cut the power if needed.
-        power_controller_pin.set_level(if temperature_too_high || powered_on_too_long {
+        power_controller_driver.set_level(if in_force_powered_off_state {
             Level::Low
         } else if any_gate_open {
             Level::High

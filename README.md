@@ -20,8 +20,20 @@ It monitors:
 # Install rust
 open https://rustup.rs/
 
-# Install espflash
-cargo install espflash
+cargo install ldproxy
+
+# Install espup to manage the esp toolchain
+cargo install espup --locked
+
+# Install the esp toolchain
+espup install
+
+# Install espflash wrapper for cargo
+cargo install cargo-espflash
+
+# Clone this repository
+git clone https://github.com/makerspace/fire-sensor.git
+cd fire-sensor
 ```
 
 ### Flashing the ESP

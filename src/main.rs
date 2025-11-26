@@ -3,7 +3,10 @@ mod esp;
 mod wifi;
 mod wokwi;
 
-use brevduva::{ReadWriteMode, SyncStorage, channel::{Channel, SerializationFormat}};
+use brevduva::{
+    channel::{Channel, SerializationFormat},
+    ReadWriteMode, SyncStorage,
+};
 use embedded_hal::delay::DelayNs;
 use esp::init_esp;
 use esp_idf_svc::{
@@ -11,14 +14,15 @@ use esp_idf_svc::{
     hal::{
         adc::{
             attenuation::DB_11,
-            oneshot::{AdcChannelDriver, config::AdcChannelConfig},
+            oneshot::{config::AdcChannelConfig, AdcChannelDriver},
         },
         gpio::{GpioError, IOPin, InputPin, Level, OutputPin, Pin, PinDriver, Pull},
-        ledc::{LedcDriver, LedcTimerDriver, config::TimerConfig},
+        ledc::{config::TimerConfig, LedcDriver, LedcTimerDriver},
         peripheral::Peripheral,
-        prelude::*, reset::ResetReason,
+        prelude::*,
+        reset::ResetReason,
     },
-    http::{Method, client::EspHttpConnection},
+    http::{client::EspHttpConnection, Method},
     nvs::EspDefaultNvsPartition,
     ota::EspOta,
     sys::EspError,
@@ -27,11 +31,11 @@ use log::{error, info, warn};
 use onewire::DS18B20;
 use onewire::{DeviceSearch, OneWire};
 use ordered_float::NotNan;
-use tokio::join;
 use std::{
     fmt::Debug,
     time::{Duration, Instant},
 };
+use tokio::join;
 use wifi::start_wifi;
 use wokwi::check_is_wokwi;
 
@@ -255,7 +259,7 @@ impl<
         } else {
             Ok(false)
         }
-        
+
         // self.read_data().map_err(|e| e.into())
     }
 }
@@ -317,18 +321,21 @@ async fn post_url(url: &'static str) -> Result<(), PostError> {
 async fn maybe_enter_safe_mode(debug_led: &mut DebugLed, status_channel: &Channel<String>) {
     match ResetReason::get() {
         ResetReason::Panic | ResetReason::TaskWatchdog | ResetReason::CPULockup => {
-            error!("Previous reset was due to panic or watchdog. Entering safe mode for 30 seconds.");
+            error!(
+                "Previous reset was due to panic or watchdog. Entering safe mode for 30 seconds."
+            );
             status_channel
-                .send("Restart was due to panic or watchdog. Entering safe mode for 30 seconds.".to_string())
+                .send(
+                    "Restart was due to panic or watchdog. Entering safe mode for 30 seconds."
+                        .to_string(),
+                )
                 .await;
             // Sleep
             debug_led
                 .blink(30, Duration::from_millis(500))
                 .await
                 .unwrap();
-            status_channel
-                .send("Exiting safe mode.".to_string())
-                .await;
+            status_channel.send("Exiting safe mode.".to_string()).await;
             info!("Exiting safe mode.");
         }
         r => {
@@ -589,7 +596,6 @@ async fn async_main() -> Result<(), EspError> {
         }
     );
 
-    let mut in_force_powered_off_state = false;
     let mut last_t = Instant::now();
 
     let send_alart_messages = {
@@ -607,17 +613,20 @@ async fn async_main() -> Result<(), EspError> {
                         // Sensor not available
                         tokio::time::sleep(Duration::from_millis(200)).await;
                         continue;
-                    },
+                    }
                     Some(pressure_high) => {
                         if pressure_high == pressure_high_last {
                             last_time_pressure_sensor_value_unchanged = Instant::now();
                         } else {
                             // State changed
                             // Delay to avoid multiple triggers due to sensor bouncing
-                            if last_time_pressure_sensor_value_unchanged.elapsed() > Duration::from_millis(500) {
+                            if last_time_pressure_sensor_value_unchanged.elapsed()
+                                > Duration::from_millis(500)
+                            {
                                 pressure_high_last = pressure_high;
                                 last_time_pressure_sensor_value_unchanged = Instant::now();
-                                let temperature = temperature_container.get().unwrap().map(|t| t.into_inner());
+                                let temperature =
+                                    temperature_container.get().unwrap().map(|t| t.into_inner());
 
                                 if !pressure_high {
                                     warn!(
@@ -626,16 +635,27 @@ async fn async_main() -> Result<(), EspError> {
                                     );
 
                                     match post_url(PRESSURE_SENSOR_TRIGGERED_URL).await {
-                                        Ok(_) => info!("Pressure sensor triggered event sent successfully"),
-                                        Err(e) => warn!("Failed to send pressure sensor triggered event: {:?}", e),
+                                        Ok(_) => info!(
+                                            "Pressure sensor triggered event sent successfully"
+                                        ),
+                                        Err(e) => warn!(
+                                            "Failed to send pressure sensor triggered event: {:?}",
+                                            e
+                                        ),
                                     }
                                 } else {
-                                    warn!("Pressure sensor reset. Temperature: {:.2} °C",
+                                    warn!(
+                                        "Pressure sensor reset. Temperature: {:.2} °C",
                                         temperature.map(|t| t).unwrap_or(f32::NAN)
                                     );
                                     match post_url(PRESSURE_SENSOR_RESET_URL).await {
-                                        Ok(_) => info!("Pressure sensor reset event sent successfully"),
-                                        Err(e) => warn!("Failed to send pressure sensor reset event: {:?}", e),
+                                        Ok(_) => {
+                                            info!("Pressure sensor reset event sent successfully")
+                                        }
+                                        Err(e) => warn!(
+                                            "Failed to send pressure sensor reset event: {:?}",
+                                            e
+                                        ),
                                     }
                                 }
                             }
@@ -652,6 +672,19 @@ async fn async_main() -> Result<(), EspError> {
     };
 
     let monitor_sensors_and_control_power = async move {
+        // True if a dust port is currently being ignored (i.e., treated as always closed).
+        // It will need to be closed to reset the ignored state.
+        let mut dust_port_ignored = dust_port_channels
+            .clone()
+            .map(|_| false)
+            .collect::<Vec<_>>();
+
+        // Track the last time each dust port was closed.
+        let mut dust_port_last_time_closed = dust_port_channels
+            .clone()
+            .map(|_| Instant::now())
+            .collect::<Vec<_>>();
+
         loop {
             let t = Instant::now();
             let dt = t.duration_since(last_t);
@@ -692,8 +725,52 @@ async fn async_main() -> Result<(), EspError> {
 
             // Read dust sensor analog value. This is an approximate distance value. A low value means more dust.
             let dust_sensor_level: u16 = dust_sensor_analog.read().unwrap_or(0);
+            let mut powered_on_too_long = false;
 
-            let any_gate_open = gates_open.iter().any(|&open| open);
+            for ((last_time_closed, &open), ignored) in dust_port_last_time_closed
+                .iter_mut()
+                .zip(gates_open.iter())
+                .zip(dust_port_ignored.iter_mut())
+            {
+                if !open {
+                    *last_time_closed = Instant::now();
+                    *ignored = false;
+                } else if last_time_closed.elapsed() > Duration::from_secs(30 * 60) {
+                    // If a gate is open too long, start ignoring the gate automatically.
+                    // This will require closing the gate to reset the system and allow the gate to work again (or a power cycle).
+                    *ignored = true;
+                    powered_on_too_long = true;
+                }
+            }
+
+            // High temperature safety cut-off
+            // The temperature sensor is right above the dust bin, below the filters.
+            let temperature_too_high = temperature.map(|t| t > 60.0);
+
+            let force_powered_off_internal = temperature_too_high.unwrap_or(false);
+
+            // Note: dust_sensor_warning_2 and pressure_high already use external relays that will cut the power if needed.
+            // But we still want to track the forced powered off state here, and will also keep the machine powered off
+            // until all gates have been closed, even if the external relays have reset.
+            let force_powered_off_external = dust_sensor_warning_2 || !pressure_high;
+            let force_powered_off = force_powered_off_internal || force_powered_off_external;
+
+            if force_powered_off {
+                for (ignored, &open) in dust_port_ignored.iter_mut().zip(gates_open.iter()) {
+                    if open {
+                        if !*ignored {
+                            warn!("Forcing gate to be ignored, as it was open when the machine was powered off due to a safety relay.");
+                        }
+                        *ignored = true;
+                    }
+                }
+            }
+
+            let any_gate_open = gates_open
+                .iter()
+                .zip(dust_port_ignored.iter())
+                .any(|(&open, &ignored)| open && !ignored);
+
             if !any_gate_open {
                 last_time_all_gates_closed = Instant::now();
             }
@@ -702,37 +779,12 @@ async fn async_main() -> Result<(), EspError> {
                 info!("Gate {i}: {}", if gate { "open" } else { "closed" });
             }
 
-            // High temperature safety cut-off
-            // The temperature sensor is right above the dust bin, below the filters.
-            let temperature_too_high = temperature.map(|t| t > 60.0);
-
-            // If the machine has been powered on for a long time, cut the power automatically.
-            // This will require closing all gates to reset the system (or a power cycle).
-            let powered_on_too_long =
-                last_time_all_gates_closed.elapsed() > Duration::from_secs(30 * 60);
-
-            let force_powered_off_internal =
-                temperature_too_high.unwrap_or(false) || powered_on_too_long;
-
-            // Note: dust_sensor_warning_2 and pressure_high already use external relays that will cut the power if needed.
-            // But we still want to track the forced powered off state here, and will also keep the machine powered off
-            // until all gates have been closed, even if the external relays have reset.
-            let force_powered_off_external = dust_sensor_warning_2 || !pressure_high;
-            let force_powered_off = force_powered_off_internal || force_powered_off_external;
-
-            in_force_powered_off_state |= force_powered_off;
-
             // Delay turning on the machine after opening gates.
             // This furhter reduces noise from unstable gate readings (not sure why they happen, but they do).
-            let any_gate_open_delayed = last_time_all_gates_closed.elapsed() > Duration::from_millis(250);
+            let any_gate_open_delayed =
+                last_time_all_gates_closed.elapsed() > Duration::from_millis(250);
 
-            if in_force_powered_off_state && !force_powered_off && !any_gate_open_delayed {
-                // Reset the forced powered off state when all conditions are cleared and all gates are closed.
-                in_force_powered_off_state = false;
-                warn!("Exiting forced powered off state");
-            }
-
-            let level = if in_force_powered_off_state {
+            let level = if force_powered_off {
                 Level::Low
             } else if any_gate_open_delayed {
                 Level::High
@@ -763,14 +815,16 @@ async fn async_main() -> Result<(), EspError> {
 
             // We control the negative side, and we read the positive side of the main power relay.
             // If both are enabled, the machine is running.
-            main_power_relay_container.set(Some(level == Level::High && main_power_relay_positive)).await;
+            main_power_relay_container
+                .set(Some(level == Level::High && main_power_relay_positive))
+                .await;
 
             dust_sensor_level_container
                 .set(Some(dust_sensor_level))
                 .await;
 
             powered_on_too_long_container
-                .set(Some(powered_on_too_long))
+                .set(Some(powered_on_too_long && !force_powered_off))
                 .await;
 
             for (gate_container, &open) in gate_containers.iter().zip(gates_open.iter()) {
@@ -792,9 +846,6 @@ async fn async_main() -> Result<(), EspError> {
     // Run both tasks concurrently (but not in parallel)
     // This allows the machine's power to still be controlled even
     // if sending alert messages takes a long time due to spotty wifi or similar.
-    tokio::try_join!(
-        send_alart_messages,
-        monitor_sensors_and_control_power,
-    ).unwrap();
+    tokio::try_join!(send_alart_messages, monitor_sensors_and_control_power,).unwrap();
     Ok(())
 }

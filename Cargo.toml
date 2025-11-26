@@ -40,15 +40,17 @@ esp-idf-svc = { version = "0.51", default-features = false }
 thiserror = "2.0"
 serde = { version = "*", features = ["derive"] }
 tokio = { version = "1", features = ["rt", "macros", "time"] }
-# sync_common = { path = "../sync_common" }
 embassy-futures = "0.1"
-brevduva = { path = "../brevduva", features = [
+brevduva = { git = "https://github.com/HalfVoxel/brevduva", rev = "88c0166", features = [
     "embedded",
 ] }
+#brevduva = { path = "../brevduva", features = [
+#    "embedded",
+#] }
 ordered-float = { version = "5.1", features = ["serde"] }
 embedded-svc = { version = "0.28", default-features = false, features = ["std", "log"] }
-# ota_flasher = { git = "https://github.com/HalfVoxel/ota_flasher", rev = "1f09e2ab", features = ["embedded"] }
-ota_flasher = { path = "../ota_flasher", features = ["embedded"] }
+ota_flasher = { git = "https://github.com/HalfVoxel/ota_flasher", rev = "6afc5c9", features = ["embedded"] }
+# ota_flasher = { path = "../ota_flasher", features = ["embedded"] }
 chrono = { version = "0.4", features = ["serde"] }
 embedded-hal = "1.0.0"
 onewire = "0.4.0"

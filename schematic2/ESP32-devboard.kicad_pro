@@ -808,6 +808,300 @@
           "label": "MANUFACTURER",
           "name": "MANUFACTURER",
           "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Drain Source Voltage (Vdss)",
+          "name": "Drain Source Voltage (Vdss)",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Emitted Color",
+          "name": "Emitted Color",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "FT Rotation Offset",
+          "name": "FT Rotation Offset",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Forward Voltage (Vf@If)",
+          "name": "Forward Voltage (Vf@If)",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Function",
+          "name": "Function",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Gate Threshold Voltage (Vgs(th)@Id)",
+          "name": "Gate Threshold Voltage (Vgs(th)@Id)",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Input Capacitance (Ciss@Vds)",
+          "name": "Input Capacitance (Ciss@Vds)",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Input Voltage",
+          "name": "Input Voltage",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Collector-Emitter Saturation Voltage (VCE(sat)@Ic,Ib)",
+          "name": "Collector-Emitter Saturation Voltage (VCE(sat)@Ic,Ib)",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "JLCPCB_CORRECTION_BACKUP",
+          "name": "JLCPCB_CORRECTION_BACKUP",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Collector-Emitter Breakdown Voltage (Vceo)",
+          "name": "Collector-Emitter Breakdown Voltage (Vceo)",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Drain Source On Resistance (RDS(on)@Vgs,Id)",
+          "name": "Drain Source On Resistance (RDS(on)@Vgs,Id)",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Category",
+          "name": "Category",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Manufacturer",
+          "name": "Manufacturer",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Minimum Qty",
+          "name": "Minimum Qty",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Number Of Channels",
+          "name": "Number Of Channels",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Number Of Outputs",
+          "name": "Number Of Outputs",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "On-State Resistance (Max)",
+          "name": "On-State Resistance (Max)",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Operating Temperature",
+          "name": "Operating Temperature",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Output Current",
+          "name": "Output Current",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Output Type",
+          "name": "Output Type",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Output Voltage",
+          "name": "Output Voltage",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Class",
+          "name": "Class",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Part",
+          "name": "Part",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Power Dissipation (Pd)",
+          "name": "Power Dissipation (Pd)",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Price",
+          "name": "Price",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Process",
+          "name": "Process",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Quiescent Current (Iq)",
+          "name": "Quiescent Current (Iq)",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Rectified Current",
+          "name": "Rectified Current",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Reverse Transfer Capacitance (Crss@Vds)",
+          "name": "Reverse Transfer Capacitance (Crss@Vds)",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Reverse Voltage (Vr)",
+          "name": "Reverse Voltage (Vr)",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Collector Current (Ic)",
+          "name": "Collector Current (Ic)",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Sim.Device",
+          "name": "Sim.Device",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Sim.Pins",
+          "name": "Sim.Pins",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Sim.Type",
+          "name": "Sim.Type",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Stock",
+          "name": "Stock",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Supply Voltage",
+          "name": "Supply Voltage",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Switch Tube (Built-In/External)",
+          "name": "Switch Tube (Built-In/External)",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Switching Frequency",
+          "name": "Switching Frequency",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Synchronous Rectification",
+          "name": "Synchronous Rectification",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Topology",
+          "name": "Topology",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Total Gate Charge (Qg@Vgs)",
+          "name": "Total Gate Charge (Qg@Vgs)",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Transistor Type",
+          "name": "Transistor Type",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Transition Frequency (fT)",
+          "name": "Transition Frequency (fT)",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Type",
+          "name": "Type",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Collector Cut-Off Current (Icbo)",
+          "name": "Collector Cut-Off Current (Icbo)",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "DC Current Gain (hFE@Ic,Vce)",
+          "name": "DC Current Gain (hFE@Ic,Vce)",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Attrition Qty",
+          "name": "Attrition Qty",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Continuous Drain Current (Id)",
+          "name": "Continuous Drain Current (Id)",
+          "show": false
         }
       ],
       "filter_string": "",

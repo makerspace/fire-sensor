@@ -48,7 +48,7 @@
         "silk_text_thickness": 0.15,
         "silk_text_upright": false,
         "zones": {
-          "min_clearance": 0.0
+          "min_clearance": 0.1524
         }
       },
       "diff_pair_dimensions": [
@@ -512,7 +512,7 @@
         "pcb_color": "rgba(0, 0, 0, 0.000)",
         "priority": 0,
         "schematic_color": "rgb(255, 153, 0)",
-        "track_width": 2.0,
+        "track_width": 1.0,
         "wire_width": 8
       },
       {
@@ -555,6 +555,9 @@
     },
     "net_colors": null,
     "netclass_assignments": {
+      "/5V": [
+        "ESP-Power"
+      ],
       "/EXT_5V": [
         "ESP-Power"
       ],
@@ -578,10 +581,6 @@
       ]
     },
     "netclass_patterns": [
-      {
-        "netclass": "ESP-Power",
-        "pattern": "/VDD33"
-      },
       {
         "netclass": "ESP-Signal",
         "pattern": "/EN"
@@ -644,7 +643,7 @@
       },
       {
         "netclass": "24V-Power",
-        "pattern": "/24V_IN"
+        "pattern": "/24V"
       },
       {
         "netclass": "24V-Power",
@@ -673,6 +672,14 @@
       {
         "netclass": "24V-Power",
         "pattern": "/LEDStrip2(-)"
+      },
+      {
+        "netclass": "ESP-Power",
+        "pattern": "/3.3V"
+      },
+      {
+        "netclass": "ESP-Power",
+        "pattern": "/5V"
       }
     ]
   },
@@ -721,15 +728,21 @@
         },
         {
           "group_by": false,
+          "label": "LCSC",
+          "name": "LCSC",
+          "show": true
+        },
+        {
+          "group_by": false,
           "label": "Datasheet",
           "name": "Datasheet",
-          "show": true
+          "show": false
         },
         {
           "group_by": false,
           "label": "Footprint",
           "name": "Footprint",
-          "show": true
+          "show": false
         },
         {
           "group_by": false,
@@ -741,7 +754,7 @@
           "group_by": true,
           "label": "DNP",
           "name": "${DNP}",
-          "show": true
+          "show": false
         },
         {
           "group_by": false,
@@ -781,15 +794,9 @@
         },
         {
           "group_by": false,
-          "label": "LCSC",
-          "name": "LCSC",
-          "show": true
-        },
-        {
-          "group_by": false,
           "label": "JLCPCB_CORRECTION",
           "name": "JLCPCB_CORRECTION",
-          "show": false
+          "show": true
         },
         {
           "group_by": false,
@@ -825,7 +832,7 @@
           "group_by": false,
           "label": "FT Rotation Offset",
           "name": "FT Rotation Offset",
-          "show": false
+          "show": true
         },
         {
           "group_by": false,
@@ -867,7 +874,7 @@
           "group_by": false,
           "label": "JLCPCB_CORRECTION_BACKUP",
           "name": "JLCPCB_CORRECTION_BACKUP",
-          "show": false
+          "show": true
         },
         {
           "group_by": false,
@@ -1101,6 +1108,18 @@
           "group_by": false,
           "label": "Continuous Drain Current (Id)",
           "name": "Continuous Drain Current (Id)",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Field6",
+          "name": "Field6",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "FT Position Offset",
+          "name": "FT Position Offset",
           "show": false
         }
       ],

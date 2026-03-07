@@ -25,7 +25,7 @@ use esp_idf_svc::{
     http::{client::EspHttpConnection, Method},
     nvs::EspDefaultNvsPartition,
     ota::EspOta,
-    sys::EspError,
+    sys::{multi_heap_info_t, EspError},
 };
 use log::{error, info, warn};
 use onewire::DS18B20;
@@ -198,10 +198,10 @@ impl<
     }
 }
 
-/// Driver for a 16-channel digital multiplexer
-/// Like the cd74hc4067
-struct Multiplexer16<T: embedded_hal::digital::OutputPin, I: embedded_hal::digital::InputPin> {
-    selector_pins: [T; 4],
+/// Driver for an 8-channel digital multiplexer
+/// Like the CD4051BM96
+struct Multiplexer8<T: embedded_hal::digital::OutputPin, I: embedded_hal::digital::InputPin> {
+    selector_pins: [T; 3],
     data_pin: I,
     delay: esp_idf_svc::hal::delay::Ets,
 }
@@ -210,9 +210,9 @@ impl<
         T: embedded_hal::digital::OutputPin<Error = E>,
         I: embedded_hal::digital::InputPin<Error = E>,
         E,
-    > Multiplexer16<T, I>
+    > Multiplexer8<T, I>
 {
-    fn new(selector_pins: [T; 4], data_pin: I, delay: esp_idf_svc::hal::delay::Ets) -> Self {
+    fn new(selector_pins: [T; 3], data_pin: I, delay: esp_idf_svc::hal::delay::Ets) -> Self {
         Self {
             selector_pins,
             data_pin,
@@ -242,19 +242,19 @@ impl<
         // The ESP32 also has some capacitance on its input pins
         // which, according to my calculations takes around 200us to charge/discharge through
         // the built-in pull-up/pull-down resistors.
-        self.delay.delay_us(1000);
+        self.delay.delay_us(200);
 
         // Even though we delay some time, we still get occasional unstable readings.
         // So we read the value multiple times and use majority voting.
         // This seems to eliminate all noise.
         let mut high_count = 0;
-        for _ in 0..20 {
+        for _ in 0..4 {
             if self.read_data().map_err(|e| e.into())? {
                 high_count += 1;
             }
             self.delay.delay_us(20);
         }
-        if high_count > 10 {
+        if high_count > 2 {
             Ok(true)
         } else {
             Ok(false)
@@ -264,6 +264,35 @@ impl<
     }
 }
 
+/// Driver for a 16-channel digital multiplexer composed of two 8-channel multiplexers
+struct Multiplexer16<
+    T: embedded_hal::digital::OutputPin,
+    I1: embedded_hal::digital::InputPin,
+    I2: embedded_hal::digital::InputPin,
+> {
+    mux1: Multiplexer8<T, I1>,
+    mux2: Multiplexer8<T, I2>,
+}
+
+impl<
+        T: embedded_hal::digital::OutputPin<Error = E>,
+        I1: embedded_hal::digital::InputPin<Error = E>,
+        I2: embedded_hal::digital::InputPin<Error = E>,
+        E,
+    > Multiplexer16<T, I1, I2>
+{
+    fn new(mux1: Multiplexer8<T, I1>, mux2: Multiplexer8<T, I2>) -> Self {
+        Self { mux1, mux2 }
+    }
+
+    fn channel_is_high(&mut self, channel: u8) -> Result<bool, E> {
+        if channel < 8 {
+            self.mux1.channel_is_high(channel)
+        } else {
+            self.mux2.channel_is_high(channel - 8)
+        }
+    }
+}
 enum PostError {
     EspError(EspError),
     Status(u16),
@@ -352,22 +381,45 @@ async fn async_main() -> Result<(), EspError> {
     let is_wokwi_simulator = check_is_wokwi()?;
 
     // Pin assignments
-    let temperature_sensor_pin = peripherals.pins.gpio23;
-    let dust_sensor_analog_pin = peripherals.pins.gpio13;
-    let power_controller_pin = peripherals.pins.gpio12;
-    let debug_led_pin = peripherals.pins.gpio2;
-    let multiplexer_data_pin = peripherals.pins.gpio33;
-    let multiplexer_selector_pin_0 = peripherals.pins.gpio14;
-    let multiplexer_selector_pin_1 = peripherals.pins.gpio27;
-    let multiplexer_selector_pin_2 = peripherals.pins.gpio26;
-    let multiplexer_selector_pin_3 = peripherals.pins.gpio25;
+    let temperature_sensor_pin = peripherals.pins.gpio32;
+    let dust_sensor_analog_pin = peripherals.pins.gpio34;
+    let power_controller_pin = peripherals.pins.gpio27;
+    let dimmer2_pin = peripherals.pins.gpio26;
+    let debug_led_pin = peripherals.pins.gpio25;
+
+    let indicator_red_pin = peripherals.pins.gpio13;
+    let indicator_yellow_pin = peripherals.pins.gpio12;
+    let indicator_green_pin = peripherals.pins.gpio14;
+    let indicator_sound_pin = peripherals.pins.gpio2;
+
+    let multiplexer1_data_pin = peripherals.pins.gpio21;
+    let multiplexer1_selector_pin_0 = peripherals.pins.gpio5;
+    let multiplexer1_selector_pin_1 = peripherals.pins.gpio18;
+    let multiplexer1_selector_pin_2 = peripherals.pins.gpio19;
+
+    let multiplexer2_data_pin = peripherals.pins.gpio17;
+    let multiplexer2_selector_pin_0 = peripherals.pins.gpio0;
+    let multiplexer2_selector_pin_1 = peripherals.pins.gpio4;
+    let multiplexer2_selector_pin_2 = peripherals.pins.gpio16;
 
     // Multiplexer channel assignments
-    let low_pressure_signal_channel = 0;
-    let dust_warning_signal_1_channel = 1;
-    let dust_warning_signal_2_channel = 2;
-    let main_power_relay_channel = 3;
-    let dust_port_channels = 4..16;
+    let main_power_relay_channel = 5;
+    let low_pressure_signal_channel = 6;
+    let high_pressure_signal_channel = 7;
+    let dust_port_channels = &[
+        3,
+        0,
+        1,
+        2,
+        8 + 5,
+        8 + 7,
+        8 + 6,
+        8 + 4,
+        8 + 3,
+        8 + 0,
+        8 + 1,
+        8 + 2,
+    ];
 
     let mut temperature_sensor =
         match TemperatureSensor::new(PinDriver::input_output_od(temperature_sensor_pin)?) {
@@ -378,7 +430,7 @@ async fn async_main() -> Result<(), EspError> {
             }
         };
 
-    let adc = esp_idf_svc::hal::adc::oneshot::AdcDriver::new(peripherals.adc2)?;
+    let adc = esp_idf_svc::hal::adc::oneshot::AdcDriver::new(peripherals.adc1)?;
 
     let mut dust_sensor_analog = AdcChannelDriver::new(
         &adc,
@@ -389,23 +441,31 @@ async fn async_main() -> Result<(), EspError> {
         },
     )?;
 
-    let mut multiplexer_data_driver = PinDriver::input(multiplexer_data_pin)?;
+    let multiplexer1_data_driver = PinDriver::input(multiplexer1_data_pin)?;
 
-    // Gate signals are GND / Floating, so we need a pull-up on data pin.
-    // The multiplexer also reads various relay signals that are active when high, but they all have stronger external pull-downs.
-    // The ESP32 internal pull-up is weak (around 10k-100k), but the external pull-downs are stronger (1.5k).
-    multiplexer_data_driver.set_pull(Pull::Up)?;
-
-    let mut multiplexer = Multiplexer16::new(
+    let multiplexer1 = Multiplexer8::new(
         [
-            PinDriver::output(multiplexer_selector_pin_0.downgrade_output())?,
-            PinDriver::output(multiplexer_selector_pin_1.downgrade_output())?,
-            PinDriver::output(multiplexer_selector_pin_2.downgrade_output())?,
-            PinDriver::output(multiplexer_selector_pin_3.downgrade_output())?,
+            PinDriver::output(multiplexer1_selector_pin_0.downgrade_output())?,
+            PinDriver::output(multiplexer1_selector_pin_1.downgrade_output())?,
+            PinDriver::output(multiplexer1_selector_pin_2.downgrade_output())?,
         ],
-        multiplexer_data_driver,
+        multiplexer1_data_driver,
         esp_idf_svc::hal::delay::Ets,
     );
+
+    let multiplexer2_data_driver = PinDriver::input(multiplexer2_data_pin)?;
+
+    let multiplexer2 = Multiplexer8::new(
+        [
+            PinDriver::output(multiplexer2_selector_pin_0.downgrade_output())?,
+            PinDriver::output(multiplexer2_selector_pin_1.downgrade_output())?,
+            PinDriver::output(multiplexer2_selector_pin_2.downgrade_output())?,
+        ],
+        multiplexer2_data_driver,
+        esp_idf_svc::hal::delay::Ets,
+    );
+
+    let mut multiplexer = Multiplexer16::new(multiplexer1, multiplexer2);
 
     // Main power relay control pin.
     // Low or Floating  = Machine Off
@@ -425,7 +485,35 @@ async fn async_main() -> Result<(), EspError> {
         &ledc_driver,
         debug_led_pin,
     )?);
+
+    let mut indicator_red = DebugLed::new(LedcDriver::new(
+        peripherals.ledc.channel0,
+        &ledc_driver,
+        indicator_red_pin,
+    )?);
+    let mut indicator_yellow = DebugLed::new(LedcDriver::new(
+        peripherals.ledc.channel3,
+        &ledc_driver,
+        indicator_yellow_pin,
+    )?);
+    let mut indicator_green = DebugLed::new(LedcDriver::new(
+        peripherals.ledc.channel2,
+        &ledc_driver,
+        indicator_green_pin,
+    )?);
+    let mut indicator_sound = DebugLed::new(LedcDriver::new(
+        peripherals.ledc.channel4,
+        &ledc_driver,
+        indicator_sound_pin,
+    )?);
+
     debug_led.blink(4, Duration::from_millis(50)).await?;
+    indicator_red.blink(2, Duration::from_millis(100)).await?;
+    indicator_yellow
+        .blink(2, Duration::from_millis(100))
+        .await?;
+    indicator_green.blink(2, Duration::from_millis(100)).await?;
+    indicator_sound.blink(2, Duration::from_millis(100)).await?;
 
     let mac = start_wifi(
         peripherals.modem,
@@ -557,11 +645,11 @@ async fn async_main() -> Result<(), EspError> {
         .unwrap();
 
     let mut gate_containers: Vec<std::sync::Arc<brevduva::SyncedContainer<Option<bool>>>> = vec![];
-    for (i, _) in dust_port_channels.clone().enumerate() {
+    for (i, _) in dust_port_channels.iter().enumerate() {
         gate_containers.push(
             storage
                 .add_container_with_mode(
-                    &format!("dust_collector/{device_id}/gates/{i}/open"),
+                    &format!("dust_collector/{device_id}/gates/{}/open", i + 1),
                     Option::<bool>::None,
                     SerializationFormat::Json,
                     ReadWriteMode::Driven,
@@ -674,14 +762,11 @@ async fn async_main() -> Result<(), EspError> {
     let monitor_sensors_and_control_power = async move {
         // True if a dust port is currently being ignored (i.e., treated as always closed).
         // It will need to be closed to reset the ignored state.
-        let mut dust_port_ignored = dust_port_channels
-            .clone()
-            .map(|_| false)
-            .collect::<Vec<_>>();
+        let mut dust_port_ignored = dust_port_channels.iter().map(|_| false).collect::<Vec<_>>();
 
         // Track the last time each dust port was closed.
         let mut dust_port_last_time_closed = dust_port_channels
-            .clone()
+            .iter()
             .map(|_| Instant::now())
             .collect::<Vec<_>>();
 
@@ -701,26 +786,21 @@ async fn async_main() -> Result<(), EspError> {
             }
 
             // Read multiplexer channels
-            // These come from the optocoupler, which pulls the signals to GND
-            // when the optocouplers input signals are HIGH (24V).
-            // Therefore, the signals are inverted here.
-            let pressure_high = !multiplexer
+            let pressure_high = multiplexer
+                .channel_is_high(high_pressure_signal_channel)
+                .unwrap();
+            // Hopefully doesn't contradict
+            let pressure_low = multiplexer
                 .channel_is_high(low_pressure_signal_channel)
                 .unwrap();
-            let dust_sensor_warning_1 = !multiplexer
-                .channel_is_high(dust_warning_signal_1_channel)
-                .unwrap();
-            let dust_sensor_warning_2 = !multiplexer
-                .channel_is_high(dust_warning_signal_2_channel)
-                .unwrap();
-            let main_power_relay_positive = !multiplexer
+            let main_power_relay_positive = multiplexer
                 .channel_is_high(main_power_relay_channel)
                 .unwrap();
 
-            // Gates are open when low. The input pin has an internal pull-up resistor.
+            // Gates are open when high
             let gates_open = dust_port_channels
-                .clone()
-                .map(|channel| !multiplexer.channel_is_high(channel).unwrap())
+                .iter()
+                .map(|&channel| multiplexer.channel_is_high(channel).unwrap())
                 .collect::<Vec<_>>();
 
             // Read dust sensor analog value. This is an approximate distance value. A low value means more dust.
@@ -749,10 +829,8 @@ async fn async_main() -> Result<(), EspError> {
 
             let force_powered_off_internal = temperature_too_high.unwrap_or(false);
 
-            // Note: dust_sensor_warning_2 and pressure_high already use external relays that will cut the power if needed.
-            // But we still want to track the forced powered off state here, and will also keep the machine powered off
-            // until all gates have been closed, even if the external relays have reset.
-            let force_powered_off_external = dust_sensor_warning_2 || !pressure_high;
+            // Will also keep the machine powered off until all gates have been closed, even if the external relays have reset.
+            let force_powered_off_external = !pressure_high;
             let force_powered_off = force_powered_off_internal || force_powered_off_external;
 
             if force_powered_off {
@@ -776,7 +854,7 @@ async fn async_main() -> Result<(), EspError> {
             }
 
             for (i, &gate) in gates_open.iter().enumerate() {
-                info!("Gate {i}: {}", if gate { "open" } else { "closed" });
+                info!("Gate {}: {}", i + 1, if gate { "open" } else { "closed" });
             }
 
             // Delay turning on the machine after opening gates.
@@ -792,6 +870,9 @@ async fn async_main() -> Result<(), EspError> {
                 Level::Low
             };
 
+            indicator_red.set_duty(if force_powered_off { 1.0 } else { 0.0 })?;
+            indicator_green.set_duty(if level == Level::High { 1.0 } else { 0.0 })?;
+
             // Update brevduva containers
             temperature_container
                 .set(temperature.map(|t| NotNan::new(t).unwrap()))
@@ -803,14 +884,6 @@ async fn async_main() -> Result<(), EspError> {
 
             water_pressure_sensor_container
                 .set(Some(pressure_high))
-                .await;
-
-            dust_sensor_warning_1_container
-                .set(Some(dust_sensor_warning_1))
-                .await;
-
-            dust_sensor_warning_2_container
-                .set(Some(dust_sensor_warning_2))
                 .await;
 
             // We control the negative side, and we read the positive side of the main power relay.

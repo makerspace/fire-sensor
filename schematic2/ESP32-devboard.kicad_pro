@@ -680,6 +680,18 @@
       {
         "netclass": "ESP-Power",
         "pattern": "/5V"
+      },
+      {
+        "netclass": "24V-Power",
+        "pattern": "/24V_RAW"
+      },
+      {
+        "netclass": "24V-Power",
+        "pattern": "/Dimmer*(-)"
+      },
+      {
+        "netclass": "24V-Power",
+        "pattern": "/Switch24V_*"
       }
     ]
   },

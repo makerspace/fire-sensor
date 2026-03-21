@@ -23016,6 +23016,16 @@
 		)
 		(uuid "7cc501e5-98f0-460e-aab2-93232c37b92a")
 	)
+	(label "Switch24V"
+		(at 321.31 273.05 90)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "7f605054-8f97-4107-a952-5773fb7f4fec")
+	)
 	(label "3.3V"
 		(at 60.96 269.24 180)
 		(effects
@@ -26116,7 +26126,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 52.07 175.768 90)
 			(effects
 				(font
@@ -29021,7 +29031,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 321.818 160.02 90)
 			(effects
 				(font
@@ -29339,7 +29349,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 52.07 102.108 90)
 			(effects
 				(font
@@ -29435,7 +29445,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 52.07 127.508 90)
 			(effects
 				(font
@@ -30386,7 +30396,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "2K2(5%)"
+		(property "Value" "2.2kΩ"
 			(at 284.48 373.38 90)
 			(effects
 				(font
@@ -30395,7 +30405,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 281.94 380.238 90)
 			(effects
 				(font
@@ -31254,7 +31264,7 @@
 				)
 			)
 		)
-		(property "Value" "10K(1%)"
+		(property "Value" "10kΩ"
 			(at 290.83 209.55 90)
 			(effects
 				(font
@@ -31262,7 +31272,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 290.83 215.138 90)
 			(effects
 				(font
@@ -32426,7 +32436,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "10K(1%)"
+		(property "Value" "10kΩ"
 			(at 284.48 347.98 90)
 			(effects
 				(font
@@ -32435,7 +32445,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 281.94 341.122 90)
 			(effects
 				(font
@@ -33224,7 +33234,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 52.07 249.428 90)
 			(effects
 				(font
@@ -33312,7 +33322,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "10K(1%)"
+		(property "Value" "10kΩ"
 			(at 284.48 369.57 90)
 			(effects
 				(font
@@ -33321,7 +33331,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 281.94 362.712 90)
 			(effects
 				(font
@@ -34903,103 +34913,6 @@
 		)
 	)
 	(symbol
-		(lib_id "Device:C")
-		(at 290.83 288.29 0)
-		(unit 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(dnp no)
-		(fields_autoplaced yes)
-		(uuid "4c387ff0-ebfa-4a09-b51d-8ca8acd1cf77")
-		(property "Reference" "C11"
-			(at 294.64 287.0199 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "0.1uF/50V(10%)"
-			(at 294.64 289.5599 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Capacitor_SMD:C_0402_1005Metric"
-			(at 291.7952 292.1 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Datasheet" "~"
-			(at 290.83 288.29 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Description" ""
-			(at 290.83 288.29 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "LCSC" "C307331"
-			(at 290.83 288.29 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "FT Rotation Offset" ""
-			(at 290.83 288.29 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "FT Position Offset" ""
-			(at 290.83 288.29 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(pin "2"
-			(uuid "22f6fde0-fa73-4a9b-9e9a-b24f4382f3e6")
-		)
-		(pin "1"
-			(uuid "974ba2cb-9468-45ee-bfd0-abcae466d2f9")
-		)
-		(instances
-			(project "ESP32-devboard"
-				(path "/de51898d-c35b-4ffa-95fd-672e2fc32785"
-					(reference "C11")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
 		(lib_id "Device:R")
 		(at 303.53 156.21 90)
 		(unit 1)
@@ -35026,7 +34939,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 303.53 157.988 90)
 			(effects
 				(font
@@ -35101,7 +35014,7 @@
 		(mirror y)
 		(unit 1)
 		(exclude_from_sim no)
-		(in_bom yes)
+		(in_bom no)
 		(on_board yes)
 		(dnp no)
 		(uuid "51056a30-e97c-4d9f-ae23-f0602c69aae3")
@@ -35991,7 +35904,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 52.07 371.348 90)
 			(effects
 				(font
@@ -37290,7 +37203,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 52.07 347.218 90)
 			(effects
 				(font
@@ -38102,7 +38015,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "2K2(5%)"
+		(property "Value" "2.2kΩ"
 			(at 439.42 185.42 0)
 			(effects
 				(font
@@ -38111,7 +38024,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 435.102 184.15 90)
 			(effects
 				(font
@@ -39254,7 +39167,7 @@
 				)
 			)
 		)
-		(property "Value" "10K(1%)"
+		(property "Value" "10kΩ"
 			(at 290.83 186.69 90)
 			(effects
 				(font
@@ -39262,7 +39175,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 290.83 192.278 90)
 			(effects
 				(font
@@ -42113,7 +42026,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 52.07 225.298 90)
 			(effects
 				(font
@@ -45696,7 +45609,7 @@
 				)
 			)
 		)
-		(property "Value" "2K2(5%)"
+		(property "Value" "2.2kΩ"
 			(at 344.17 147.32 90)
 			(effects
 				(font
@@ -45704,7 +45617,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 344.17 152.908 90)
 			(effects
 				(font
@@ -48077,7 +47990,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "10K(1%)"
+		(property "Value" "10kΩ"
 			(at 373.38 77.47 0)
 			(effects
 				(font
@@ -48086,7 +47999,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 369.062 76.2 90)
 			(effects
 				(font
@@ -48925,7 +48838,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 52.07 29.718 90)
 			(effects
 				(font
@@ -49564,6 +49477,202 @@
 		)
 	)
 	(symbol
+		(lib_id "PCM_JLCPCB-Capacitors:0603,100nF")
+		(at 290.83 288.29 180)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "af8354b7-91af-498e-a94d-9507da28dcd7")
+		(property "Reference" "C11"
+			(at 296.164 286.512 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "100nF"
+			(at 293.6239 286.512 90)
+			(effects
+				(font
+					(size 0.8 0.8)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" "PCM_JLCPCB:C_0603"
+			(at 292.608 288.29 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "https://www.lcsc.com/datasheet/lcsc_datasheet_2211101700_YAGEO-CC0603KRX7R9BB104_C14663.pdf"
+			(at 290.83 288.29 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "50V 100nF X7R ±10% 0603 Multilayer Ceramic Capacitors MLCC - SMD/SMT ROHS"
+			(at 290.83 288.29 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "LCSC" "C14663"
+			(at 290.83 288.29 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Stock" "70324515"
+			(at 290.83 288.29 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Price" "0.006USD"
+			(at 290.83 288.29 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Process" "SMT"
+			(at 290.83 288.29 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Minimum Qty" "20"
+			(at 290.83 288.29 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Attrition Qty" "10"
+			(at 290.83 288.29 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Class" "Basic Component"
+			(at 290.83 288.29 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Category" "Capacitors,Multilayer Ceramic Capacitors MLCC - SMD/SMT"
+			(at 290.83 288.29 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Manufacturer" "YAGEO"
+			(at 290.83 288.29 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Part" "CC0603KRX7R9BB104"
+			(at 290.83 288.29 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Voltage Rated" "50V"
+			(at 292.1 289.306 90)
+			(effects
+				(font
+					(size 0.8 0.8)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+		(property "Tolerance" "±10%"
+			(at 290.83 288.29 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Capacitance" "100nF"
+			(at 290.83 288.29 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Temperature Coefficient" "X7R"
+			(at 290.83 288.29 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "df7c4a7d-c847-46eb-ade7-49110d1dfe45")
+		)
+		(pin "2"
+			(uuid "b8f71b59-3b6f-4ce8-b0f0-c6fb98237597")
+		)
+		(instances
+			(project "ESP32-devboard"
+				(path "/de51898d-c35b-4ffa-95fd-672e2fc32785"
+					(reference "C11")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "Device:R")
 		(at 52.07 149.86 90)
 		(unit 1)
@@ -49590,7 +49699,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 52.07 151.638 90)
 			(effects
 				(font
@@ -49811,7 +49920,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "2K2(5%)"
+		(property "Value" "2.2kΩ"
 			(at 284.48 332.74 90)
 			(effects
 				(font
@@ -49820,7 +49929,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 281.94 339.598 90)
 			(effects
 				(font
@@ -50116,7 +50225,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 52.07 297.688 90)
 			(effects
 				(font
@@ -50901,7 +51010,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Capacitor_THT:CP_Radial_D6.3mm_P2.50mm"
+		(property "Footprint" "Capacitor_THT:CP_Radial_D10.0mm_P5.00mm"
 			(at 279.0952 292.1 0)
 			(effects
 				(font
@@ -51425,7 +51534,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Capacitor_THT:CP_Radial_D6.3mm_P2.50mm"
+		(property "Footprint" "Capacitor_THT:CP_Radial_D10.0mm_P5.00mm"
 			(at 369.2652 292.1 0)
 			(effects
 				(font
@@ -52878,7 +52987,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 52.07 53.848 90)
 			(effects
 				(font
@@ -54009,7 +54118,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 52.07 323.088 90)
 			(effects
 				(font
@@ -54377,7 +54486,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "10K(1%)"
+		(property "Value" "10kΩ"
 			(at 284.48 388.62 90)
 			(effects
 				(font
@@ -54386,7 +54495,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 281.94 381.762 90)
 			(effects
 				(font
@@ -54483,7 +54592,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 52.07 77.978 90)
 			(effects
 				(font
@@ -55414,7 +55523,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 52.07 273.558 90)
 			(effects
 				(font
@@ -56286,7 +56395,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 52.07 199.898 90)
 			(effects
 				(font
@@ -60049,7 +60158,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 52.07 395.478 90)
 			(effects
 				(font
@@ -61147,7 +61256,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "2K2(5%)"
+		(property "Value" "2.2kΩ"
 			(at 284.48 354.076 90)
 			(effects
 				(font
@@ -61156,7 +61265,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+		(property "Footprint" "PCM_JLCPCB:R_0603"
 			(at 281.94 361.188 90)
 			(effects
 				(font

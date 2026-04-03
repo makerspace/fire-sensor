@@ -31,11 +31,11 @@ use log::{error, info, warn};
 use onewire::DS18B20;
 use onewire::{DeviceSearch, OneWire};
 use ordered_float::NotNan;
+use serde::{Deserialize, Serialize};
 use std::{
     fmt::Debug,
     time::{Duration, Instant},
 };
-use tokio::join;
 use wifi::start_wifi;
 use wokwi::check_is_wokwi;
 
@@ -47,6 +47,37 @@ const MQTT_PASSWORD: &str = "xafzz25nomehasff";
 const PRESSURE_SENSOR_TRIGGERED_URL: &str =
     "https://api.makerspace.se/alerts/pressure_sensor_triggered";
 const PRESSURE_SENSOR_RESET_URL: &str = "https://api.makerspace.se/alerts/pressure_sensor_reset";
+
+const DISTANCE_MIN: i32 = 250; // 250-
+const DISTANCE_MAX: i32 = DISTANCE_CART_NOT_LOADED; // 1160-
+// const DISTANCE_CART_NO_BAG_LOADED: i32 = 1170; // 1170+
+const DISTANCE_CART_NOT_LOADED: i32 = 1180; // 1210+
+const DISTANCE_NO_CART: i32 = 1350; // 1350+
+const DISTANCE_NO_VALUE: i32 = 1700; // 1700+
+
+#[derive(Debug, Clone, Copy, PartialEq, Hash, Serialize, Deserialize)]
+enum DustLevel {
+    Valid(NotNan<f32>),
+    TooCloseToSensor,
+    CartPresentNotLoaded,
+    NoCart,
+    SensorConfused,
+}
+
+fn map_dust_level(level: f32) -> DustLevel {
+    if level > DISTANCE_NO_VALUE as f32 {
+        DustLevel::SensorConfused
+    } else if level > DISTANCE_NO_CART as f32 {
+        DustLevel::NoCart
+    } else if level > DISTANCE_CART_NOT_LOADED as f32 {
+        DustLevel::CartPresentNotLoaded
+    } else if level < DISTANCE_MIN as f32 {
+        DustLevel::TooCloseToSensor
+    } else {
+        // Map to 0..1 range
+        DustLevel::Valid(NotNan::new(1.0 - (level - DISTANCE_MIN as f32) / (DISTANCE_MAX - DISTANCE_MIN) as f32).unwrap())
+    } 
+}
 
 fn main() {
     init_esp();
@@ -497,7 +528,7 @@ async fn async_main() -> Result<(), EspError> {
         indicator_yellow_pin,
     )?);
     let mut indicator_green = DebugLed::new(LedcDriver::new(
-        peripherals.ledc.channel2,
+        peripherals.ledc.channel6,
         &ledc_driver,
         indicator_green_pin,
     )?);
@@ -627,6 +658,16 @@ async fn async_main() -> Result<(), EspError> {
     let dust_sensor_level_container = storage
         .add_container_with_mode(
             &format!("dust_collector/{device_id}/dust_level"),
+            Option::<DustLevel>::None,
+            SerializationFormat::Json,
+            ReadWriteMode::Driven,
+        )
+        .await
+        .unwrap();
+
+    let dust_sensor_level_raw_container = storage
+        .add_container_with_mode(
+            &format!("dust_collector/{device_id}/dust_level_raw"),
             Option::<u16>::None,
             SerializationFormat::Json,
             ReadWriteMode::Driven,
@@ -671,6 +712,7 @@ async fn async_main() -> Result<(), EspError> {
     debug_led.blink(10, Duration::from_millis(20)).await?;
 
     let mut last_time_all_gates_closed = Instant::now();
+    let mut last_sound_alert = Instant::now();
     let mut pressure_high_last = !multiplexer
         .channel_is_high(low_pressure_signal_channel)
         .unwrap();
@@ -770,6 +812,8 @@ async fn async_main() -> Result<(), EspError> {
             .map(|_| Instant::now())
             .collect::<Vec<_>>();
 
+        let mut dust_sensor_level_smooth: f32 = 0.0;
+
         loop {
             let t = Instant::now();
             let dt = t.duration_since(last_t);
@@ -786,16 +830,23 @@ async fn async_main() -> Result<(), EspError> {
             }
 
             // Read multiplexer channels
-            let pressure_high = multiplexer
+            let mut pressure_high = multiplexer
                 .channel_is_high(high_pressure_signal_channel)
                 .unwrap();
             // Hopefully doesn't contradict
             let pressure_low = multiplexer
                 .channel_is_high(low_pressure_signal_channel)
                 .unwrap();
-            let main_power_relay_positive = multiplexer
-                .channel_is_high(main_power_relay_channel)
-                .unwrap();
+            if pressure_low && pressure_high {
+                warn!("Both pressure sensor channels are high! This shouldn't happen.");
+                pressure_high = false;
+            }
+
+            // let main_power_relay_positive = multiplexer
+            //     .channel_is_high(main_power_relay_channel)
+            //     .unwrap();
+            // Uses same power source as this controller, so if we have power then it's true.
+            let main_power_relay_positive = true;
 
             // Gates are open when high
             let gates_open = dust_port_channels
@@ -805,6 +856,16 @@ async fn async_main() -> Result<(), EspError> {
 
             // Read dust sensor analog value. This is an approximate distance value. A low value means more dust.
             let dust_sensor_level: u16 = dust_sensor_analog.read().unwrap_or(0);
+            let dust_sensor_level_current_smooth = dust_sensor_level as f32;
+            const ALPHA: f32 = 0.1;
+            if dust_sensor_level_smooth == 0.0 {
+                dust_sensor_level_smooth = dust_sensor_level_current_smooth;
+            } else {
+                dust_sensor_level_smooth = dust_sensor_level_smooth * (1.0 - ALPHA) + dust_sensor_level_current_smooth * ALPHA;
+            }
+
+            let dust_level_normalized = map_dust_level(dust_sensor_level_smooth);
+
             let mut powered_on_too_long = false;
 
             for ((last_time_closed, &open), ignored) in dust_port_last_time_closed
@@ -844,6 +905,12 @@ async fn async_main() -> Result<(), EspError> {
                 }
             }
 
+            let powered_off_due_to_dust_level = match dust_level_normalized {
+                DustLevel::NoCart | DustLevel::CartPresentNotLoaded => true,
+                DustLevel::Valid(x) if x > NotNan::new(0.8).unwrap() => true,
+                DustLevel::SensorConfused | DustLevel::TooCloseToSensor | DustLevel::Valid(_) => false,
+            };
+
             let any_gate_open = gates_open
                 .iter()
                 .zip(dust_port_ignored.iter())
@@ -862,7 +929,7 @@ async fn async_main() -> Result<(), EspError> {
             let any_gate_open_delayed =
                 last_time_all_gates_closed.elapsed() > Duration::from_millis(250);
 
-            let level = if force_powered_off {
+            let level = if force_powered_off || powered_off_due_to_dust_level {
                 Level::Low
             } else if any_gate_open_delayed {
                 Level::High
@@ -870,8 +937,30 @@ async fn async_main() -> Result<(), EspError> {
                 Level::Low
             };
 
-            indicator_red.set_duty(if force_powered_off { 1.0 } else { 0.0 })?;
-            indicator_green.set_duty(if level == Level::High { 1.0 } else { 0.0 })?;
+            if force_powered_off {
+                indicator_red.set_duty(1.0)?;
+                indicator_yellow.set_duty(0.0)?;
+                indicator_green.set_duty(0.0)?;
+            } else if powered_off_due_to_dust_level {
+                indicator_red.set_duty(0.5)?;
+                indicator_yellow.set_duty(1.0)?;
+                indicator_green.set_duty(0.0)?;
+            } else if level == Level::High {
+                indicator_red.set_duty(0.0)?;
+                indicator_yellow.set_duty(0.0)?;
+                indicator_green.set_duty(1.0)?;
+            } else {
+                indicator_red.set_duty(0.0)?;
+                indicator_yellow.set_duty(0.0)?;
+                indicator_green.set_duty(0.5)?;
+            }
+
+            if pressure_low {
+                if last_sound_alert.elapsed() > Duration::from_secs(10) {
+                    indicator_sound.blink(2, Duration::from_millis(500)).await?;
+                    last_sound_alert = Instant::now();
+                }
+            }
 
             // Update brevduva containers
             temperature_container
@@ -893,7 +982,11 @@ async fn async_main() -> Result<(), EspError> {
                 .await;
 
             dust_sensor_level_container
-                .set(Some(dust_sensor_level))
+                .set(Some(dust_level_normalized))
+                .await;
+
+            dust_sensor_level_raw_container
+                .set(Some(dust_sensor_level_smooth.round() as u16))
                 .await;
 
             powered_on_too_long_container

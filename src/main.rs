@@ -32,12 +32,15 @@ use onewire::DS18B20;
 use onewire::{DeviceSearch, OneWire};
 use ordered_float::NotNan;
 use serde::{Deserialize, Serialize};
+use smart_leds::SmartLedsWrite;
 use std::{
     fmt::Debug,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use wifi::start_wifi;
 use wokwi::check_is_wokwi;
+use ws2812_esp32_rmt_driver::Ws2812Esp32Rmt;
 
 const MQTT_HOST: &str = "mqtt://arongranberg.com:1883";
 const MQTT_CLIENT_ID: &str = "dust_collector";
@@ -47,10 +50,11 @@ const MQTT_PASSWORD: &str = "xafzz25nomehasff";
 const PRESSURE_SENSOR_TRIGGERED_URL: &str =
     "https://api.makerspace.se/alerts/pressure_sensor_triggered";
 const PRESSURE_SENSOR_RESET_URL: &str = "https://api.makerspace.se/alerts/pressure_sensor_reset";
+const SEND_ALERT_MESSAGES: bool = false;
 
 const DISTANCE_MIN: i32 = 250; // 250-
 const DISTANCE_MAX: i32 = DISTANCE_CART_NOT_LOADED; // 1160-
-// const DISTANCE_CART_NO_BAG_LOADED: i32 = 1170; // 1170+
+                                                    // const DISTANCE_CART_NO_BAG_LOADED: i32 = 1170; // 1170+
 const DISTANCE_CART_NOT_LOADED: i32 = 1180; // 1210+
 const DISTANCE_NO_CART: i32 = 1350; // 1350+
 const DISTANCE_NO_VALUE: i32 = 1700; // 1700+
@@ -75,8 +79,11 @@ fn map_dust_level(level: f32) -> DustLevel {
         DustLevel::TooCloseToSensor
     } else {
         // Map to 0..1 range
-        DustLevel::Valid(NotNan::new(1.0 - (level - DISTANCE_MIN as f32) / (DISTANCE_MAX - DISTANCE_MIN) as f32).unwrap())
-    } 
+        DustLevel::Valid(
+            NotNan::new(1.0 - (level - DISTANCE_MIN as f32) / (DISTANCE_MAX - DISTANCE_MIN) as f32)
+                .unwrap(),
+        )
+    }
 }
 
 fn main() {
@@ -403,6 +410,124 @@ async fn maybe_enter_safe_mode(debug_led: &mut DebugLed, status_channel: &Channe
         }
     }
 }
+const LED_STRIP_NUM_LEDS: usize = 60;
+
+const DUST_LEVEL_WARNING_THRESHOLD: f32 = 0.6;
+const DUST_LEVEL_CRITICAL_THRESHOLD: f32 = 0.8;
+
+fn create_led_strip<'d>(
+    rmt_channel: impl esp_idf_svc::hal::peripheral::Peripheral<P = impl esp_idf_svc::hal::rmt::RmtChannel>
+        + 'd,
+    pin: impl esp_idf_svc::hal::peripheral::Peripheral<P = impl OutputPin> + 'd,
+) -> Result<Ws2812Esp32Rmt<'d>, Box<dyn std::error::Error>> {
+    use esp_idf_svc::hal::rmt::{config::TransmitConfig, TxRmtDriver};
+    let config = TransmitConfig::new().clock_divider(1).mem_block_num(8);
+    let driver = TxRmtDriver::new(rmt_channel, pin, &config)?;
+    Ok(Ws2812Esp32Rmt::new_with_rmt_driver(driver)?)
+}
+
+fn run_led_test_pattern(ws2812: &mut Ws2812Esp32Rmt) -> Result<(), Box<dyn std::error::Error>> {
+    let colors: [(u8, u8, u8); 4] = [
+        (255, 0, 0), // Red
+        (0, 255, 0), // Green
+        (0, 0, 255), // Blue
+        (0, 0, 0),   // Off
+    ];
+
+    for &(r, g, b) in &colors {
+        let pixels = std::iter::repeat(smart_leds::RGB8::new(r, g, b)).take(LED_STRIP_NUM_LEDS);
+        ws2812.write(pixels)?;
+        std::thread::sleep(Duration::from_millis(500));
+    }
+
+    Ok(())
+}
+
+/// Animation speed in cycles per second.
+const LED_ANIMATION_SPEED: f32 = 0.1;
+
+fn update_led_strip(ws2812: &mut Ws2812Esp32Rmt, dust_level: DustLevel, animation_time: f32) {
+    let pixels: Vec<smart_leds::RGB8> = match dust_level {
+        DustLevel::TooCloseToSensor | DustLevel::SensorConfused => {
+            // Orange white noise
+            let tick = (animation_time * 10.0) as u32;
+            (0..LED_STRIP_NUM_LEDS)
+                .map(|i| {
+                    // Simple deterministic noise from tick + position
+                    let hash = (tick.wrapping_mul(31).wrapping_add(i as u32).wrapping_mul(7)) % 256;
+                    let brightness = (hash as f32 / 255.0).powi(2);
+                    let r = (255.0 * brightness) as u8;
+                    let g = (100.0 * brightness) as u8;
+                    smart_leds::RGB8::new(r, g, 0)
+                })
+                .collect()
+        }
+        DustLevel::CartPresentNotLoaded | DustLevel::NoCart => {
+            // Every third LED orange, animating forward
+            let offset = (animation_time * 3.0) as usize % 3;
+            (0..LED_STRIP_NUM_LEDS)
+                .map(|i| {
+                    if (i + offset) % 3 == 0 {
+                        smart_leds::RGB8::new(255, 100, 0)
+                    } else {
+                        smart_leds::RGB8::new(0, 0, 0)
+                    }
+                })
+                .collect()
+        }
+        DustLevel::Valid(value) => {
+            let value = value.into_inner();
+            let lit_count = (value * LED_STRIP_NUM_LEDS as f32).round() as usize;
+            let warning_led =
+                (DUST_LEVEL_WARNING_THRESHOLD * LED_STRIP_NUM_LEDS as f32).round() as usize;
+            let critical_led =
+                (DUST_LEVEL_CRITICAL_THRESHOLD * LED_STRIP_NUM_LEDS as f32).round() as usize;
+
+            (0..LED_STRIP_NUM_LEDS)
+                .map(|i| {
+                    if i >= lit_count {
+                        smart_leds::RGB8::new(0, 0, 0)
+                    } else if i >= critical_led {
+                        smart_leds::RGB8::new(255, 0, 0)
+                    } else if i >= warning_led {
+                        smart_leds::RGB8::new(255, 100, 0)
+                    } else {
+                        smart_leds::RGB8::new(0, 255, 0)
+                    }
+                })
+                .collect()
+        }
+    };
+
+    if let Err(e) = ws2812.write(pixels.into_iter()) {
+        error!("Failed to update LED strip: {:?}", e);
+    }
+}
+
+async fn run_led_animation(
+    mut ws2812: Ws2812Esp32Rmt<'static>,
+    dust_level: Arc<Mutex<DustLevel>>,
+    max_duration: Duration,
+) {
+    let mut animation_time: f32 = 0.0;
+    let mut last_instant = Instant::now();
+    let start = Instant::now();
+    loop {
+        let now = Instant::now();
+        if now.duration_since(start) >= max_duration {
+            break;
+        }
+        let dt = now.duration_since(last_instant).as_secs_f32();
+        last_instant = now;
+        animation_time += dt * LED_ANIMATION_SPEED;
+
+        let level = *dust_level.lock().unwrap();
+        update_led_strip(&mut ws2812, level, animation_time);
+        // std::thread::sleep(Duration::from_millis(30));
+        tokio::time::sleep(Duration::from_millis(30)).await;
+    }
+}
+
 async fn async_main() -> Result<(), EspError> {
     let peripherals = Peripherals::take()?;
     let sys_loop = EspSystemEventLoop::take()?;
@@ -429,6 +554,9 @@ async fn async_main() -> Result<(), EspError> {
     let multiplexer1_selector_pin_2 = peripherals.pins.gpio19;
 
     let multiplexer2_data_pin = peripherals.pins.gpio17;
+    let led_strip_pin = peripherals.pins.gpio33;
+    let led_strip_rmt_channel = peripherals.rmt.channel0;
+
     let multiplexer2_selector_pin_0 = peripherals.pins.gpio0;
     let multiplexer2_selector_pin_1 = peripherals.pins.gpio4;
     let multiplexer2_selector_pin_2 = peripherals.pins.gpio16;
@@ -546,6 +674,27 @@ async fn async_main() -> Result<(), EspError> {
     indicator_green.blink(2, Duration::from_millis(100)).await?;
     indicator_sound.blink(2, Duration::from_millis(100)).await?;
 
+    let mut ws2812 = match create_led_strip(led_strip_rmt_channel, led_strip_pin) {
+        Ok(ws2812) => {
+            info!("LED strip initialized.");
+            Some(ws2812)
+        }
+        Err(e) => {
+            error!("Failed to initialize LED strip: {:?}", e);
+            None
+        }
+    };
+
+    if let Some(ref mut ws) = ws2812 {
+        info!("Running LED strip test pattern...");
+        match run_led_test_pattern(ws) {
+            Ok(()) => info!("LED strip test pattern complete."),
+            Err(e) => error!("LED strip test pattern failed: {:?}", e),
+        }
+    }
+
+    let shared_dust_level = Arc::new(Mutex::new(DustLevel::SensorConfused));
+
     let mac = start_wifi(
         peripherals.modem,
         sys_loop.clone(),
@@ -563,6 +712,11 @@ async fn async_main() -> Result<(), EspError> {
 
     let device_id = format!("{MQTT_CLIENT_ID} {mac_str}");
     info!("Device ID: {}", device_id);
+
+    if let Some(ws) = ws2812 {
+        let shared_dust_level_for_animation = shared_dust_level.clone();
+        run_led_animation(ws, shared_dust_level_for_animation, Duration::from_secs(30)).await;
+    }
 
     // Initialize brevduva storage
     // This will connect to an MQTT broker
@@ -801,6 +955,7 @@ async fn async_main() -> Result<(), EspError> {
         }
     };
 
+    let shared_dust_level_for_animation = shared_dust_level.clone();
     let monitor_sensors_and_control_power = async move {
         // True if a dust port is currently being ignored (i.e., treated as always closed).
         // It will need to be closed to reset the ignored state.
@@ -861,10 +1016,13 @@ async fn async_main() -> Result<(), EspError> {
             if dust_sensor_level_smooth == 0.0 {
                 dust_sensor_level_smooth = dust_sensor_level_current_smooth;
             } else {
-                dust_sensor_level_smooth = dust_sensor_level_smooth * (1.0 - ALPHA) + dust_sensor_level_current_smooth * ALPHA;
+                dust_sensor_level_smooth = dust_sensor_level_smooth * (1.0 - ALPHA)
+                    + dust_sensor_level_current_smooth * ALPHA;
             }
 
             let dust_level_normalized = map_dust_level(dust_sensor_level_smooth);
+
+            *shared_dust_level.lock().unwrap() = dust_level_normalized;
 
             let mut powered_on_too_long = false;
 
@@ -907,8 +1065,12 @@ async fn async_main() -> Result<(), EspError> {
 
             let powered_off_due_to_dust_level = match dust_level_normalized {
                 DustLevel::NoCart | DustLevel::CartPresentNotLoaded => true,
-                DustLevel::Valid(x) if x > NotNan::new(0.8).unwrap() => true,
-                DustLevel::SensorConfused | DustLevel::TooCloseToSensor | DustLevel::Valid(_) => false,
+                DustLevel::Valid(x) if x > NotNan::new(DUST_LEVEL_CRITICAL_THRESHOLD).unwrap() => {
+                    true
+                }
+                DustLevel::SensorConfused | DustLevel::TooCloseToSensor | DustLevel::Valid(_) => {
+                    false
+                }
             };
 
             let any_gate_open = gates_open
@@ -1009,9 +1171,31 @@ async fn async_main() -> Result<(), EspError> {
         Ok(())
     };
 
-    // Run both tasks concurrently (but not in parallel)
+    // Run LED animation on core 1 in its own thread
+    // if let Some(ws) = ws2812 {
+    //     use esp_idf_svc::hal::task::thread::ThreadSpawnConfiguration;
+    //     ThreadSpawnConfiguration {
+    //         pin_to_core: Some(esp_idf_svc::hal::cpu::Core::Core1),
+    //         stack_size: 4096,
+    //         priority: 15,
+    //         ..Default::default()
+    //     }
+    //     .set()
+    //     .unwrap();
+
+    //     std::thread::spawn(move || run_led_animation(ws, shared_dust_level_for_animation));
+
+    //     // Reset to default so subsequent threads aren't pinned
+    //     ThreadSpawnConfiguration::default().set().unwrap();
+    // }
+
+    // Run tasks concurrently (but not in parallel)
     // This allows the machine's power to still be controlled even
     // if sending alert messages takes a long time due to spotty wifi or similar.
-    tokio::try_join!(send_alart_messages, monitor_sensors_and_control_power,).unwrap();
+    if SEND_ALERT_MESSAGES {
+        tokio::try_join!(send_alart_messages, monitor_sensors_and_control_power,).unwrap();
+    } else {
+        monitor_sensors_and_control_power.await.unwrap();
+    }
     Ok(())
 }

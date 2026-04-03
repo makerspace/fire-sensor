@@ -475,16 +475,12 @@ where
     let pixels: Vec<smart_leds::RGB8> = match dust_level {
         DustLevel::TooCloseToSensor | DustLevel::SensorConfused => {
             // Orange white noise
-            let tick = (animation_time * 10.0) as u32;
+            let tick = (animation_time * 1.0) as u32;
             (0..LED_STRIP_NUM_LEDS)
                 .map(|i| {
                     // Simple deterministic noise from tick + position
-                    let hash = (tick
-                        .wrapping_mul(1237)
-                        .wrapping_add((i * 7) as u32)
-                        .wrapping_mul(512353))
-                        % 256;
-                    let mut brightness = (hash as f32 / 255.0).powi(2);
+                    let hash = (i as u32 + tick) % 2;
+                    let mut brightness = hash as f32;
                     brightness *= global_brightness;
 
                     let r = (255.0 * brightness) as u8;
@@ -492,6 +488,23 @@ where
                     smart_leds::RGB8::new(r, g, 0)
                 })
                 .collect()
+
+            // (0..LED_STRIP_NUM_LEDS)
+            //     .map(|i| {
+            //         // Simple deterministic noise from tick + position
+            //         let hash = (tick
+            //             .wrapping_mul(1237)
+            //             .wrapping_add((i * 7) as u32)
+            //             .wrapping_mul(512353))
+            //             % 256;
+            //         let mut brightness = (hash as f32 / 255.0).powi(2);
+            //         brightness *= global_brightness;
+
+            //         let r = (255.0 * brightness) as u8;
+            //         let g = (100.0 * brightness) as u8;
+            //         smart_leds::RGB8::new(r, g, 0)
+            //     })
+            //     .collect()
         }
         DustLevel::CartPresentNotLoaded | DustLevel::NoCart => (0..LED_STRIP_NUM_LEDS)
             .map(|i| {

@@ -20,7 +20,7 @@ pub async fn start_wifi(
     nvs: EspDefaultNvsPartition,
     timer_service: EspTaskTimerService,
     is_wokwi_simulator: bool,
-) -> [u8; 6] {
+) -> Result<[u8; 6], EspError> {
     let wifi = AsyncWifi::wrap(
         EspWifi::new(modem, sys_loop.clone(), Some(nvs)).unwrap(),
         sys_loop,
@@ -31,14 +31,14 @@ pub async fn start_wifi(
     let mac = wifi.wifi().ap_netif().get_mac().unwrap();
 
     let mut wifi_loop = WifiLoop { wifi };
-    wifi_loop.configure(is_wokwi_simulator).await.unwrap();
-    wifi_loop.initial_connect().await.unwrap();
+    wifi_loop.configure(is_wokwi_simulator).await?;
+    wifi_loop.initial_connect().await?;
 
     tokio::spawn(async move {
         wifi_loop.stay_connected().await.unwrap();
     });
 
-    mac
+    Ok(mac)
 }
 
 pub struct WifiLoop<'a> {

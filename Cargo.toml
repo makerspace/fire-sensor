@@ -54,7 +54,7 @@ ota_flasher = { git = "https://github.com/HalfVoxel/ota_flasher", rev = "6afc5c9
 chrono = { version = "0.4", features = ["serde"] }
 embedded-hal = "1.0.0"
 onewire = "0.4.0"
-ws2812-esp32-rmt-driver = { version = "0.13", features = ["smart-leds-trait"] }
+ws2812-spi = "0.5"
 smart-leds = "0.4"
 
 

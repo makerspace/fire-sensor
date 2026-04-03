@@ -40,7 +40,6 @@ use std::{
 };
 use wifi::start_wifi;
 use wokwi::check_is_wokwi;
-use ws2812_esp32_rmt_driver::Ws2812Esp32Rmt;
 
 const MQTT_HOST: &str = "mqtt://arongranberg.com:1883";
 const MQTT_CLIENT_ID: &str = "dust_collector";
@@ -412,21 +411,33 @@ async fn maybe_enter_safe_mode(debug_led: &mut DebugLed, status_channel: &Channe
 }
 const LED_STRIP_NUM_LEDS: usize = 60;
 
+type SpiBus<'d> = esp_idf_svc::hal::spi::SpiBusDriver<'d, esp_idf_svc::hal::spi::SpiDriver<'d>>;
 const DUST_LEVEL_WARNING_THRESHOLD: f32 = 0.6;
 const DUST_LEVEL_CRITICAL_THRESHOLD: f32 = 0.8;
 
-fn create_led_strip<'d>(
-    rmt_channel: impl esp_idf_svc::hal::peripheral::Peripheral<P = impl esp_idf_svc::hal::rmt::RmtChannel>
-        + 'd,
-    pin: impl esp_idf_svc::hal::peripheral::Peripheral<P = impl OutputPin> + 'd,
-) -> Result<Ws2812Esp32Rmt<'d>, Box<dyn std::error::Error>> {
-    use esp_idf_svc::hal::rmt::{config::TransmitConfig, TxRmtDriver};
-    let config = TransmitConfig::new().clock_divider(1).mem_block_num(8);
-    let driver = TxRmtDriver::new(rmt_channel, pin, &config)?;
-    Ok(Ws2812Esp32Rmt::new_with_rmt_driver(driver)?)
+fn create_spi_bus<'d>(
+    spi: impl esp_idf_svc::hal::peripheral::Peripheral<P = impl esp_idf_svc::hal::spi::SpiAnyPins> + 'd,
+    sclk: impl esp_idf_svc::hal::peripheral::Peripheral<P = impl OutputPin> + 'd,
+    mosi: impl esp_idf_svc::hal::peripheral::Peripheral<P = impl OutputPin> + 'd,
+) -> Result<SpiBus<'d>, Box<dyn std::error::Error>> {
+    use esp_idf_svc::hal::spi::{config::Config, Dma, SpiBusDriver, SpiDriver, SpiDriverConfig};
+
+    let spi_driver = SpiDriver::new(
+        spi,
+        sclk,
+        mosi,
+        None::<esp_idf_svc::hal::gpio::AnyIOPin>,
+        &SpiDriverConfig::new().dma(Dma::Auto(LED_STRIP_NUM_LEDS * 12 + 140)),
+    )?;
+
+    let config = Config::new().baudrate(3.MHz().into()).write_only(true);
+    Ok(SpiBusDriver::new(spi_driver, &config)?)
 }
 
-fn run_led_test_pattern(ws2812: &mut Ws2812Esp32Rmt) -> Result<(), Box<dyn std::error::Error>> {
+fn run_led_test_pattern<W: SmartLedsWrite>(ws2812: &mut W) -> Result<(), W::Error>
+where
+    W::Color: From<smart_leds::RGB8>,
+{
     let colors: [(u8, u8, u8); 4] = [
         (255, 0, 0), // Red
         (0, 255, 0), // Green
@@ -443,10 +454,24 @@ fn run_led_test_pattern(ws2812: &mut Ws2812Esp32Rmt) -> Result<(), Box<dyn std::
     Ok(())
 }
 
-/// Animation speed in cycles per second.
-const LED_ANIMATION_SPEED: f32 = 0.1;
+const MOVING_ARROWS_SPEED: f32 = 10.0;
+const MOVING_ARROWS_LENGTH: f32 = 16.0;
+const INTRO_FADE: f32 = 5.0;
 
-fn update_led_strip(ws2812: &mut Ws2812Esp32Rmt, dust_level: DustLevel, animation_time: f32) {
+fn ease_out_cubic(x: f32) -> f32 {
+    1.0 - (1.0 - x).powi(3)
+}
+
+fn update_led_strip<W: SmartLedsWrite>(ws2812: &mut W, dust_level: DustLevel, animation_time: f32)
+where
+    W::Color: From<smart_leds::RGB8>,
+    W::Error: Debug,
+{
+    let intro_fade = (animation_time.min(INTRO_FADE) / INTRO_FADE).clamp(0.0, 1.0);
+    let intro_fade_staggered =
+        ((animation_time - INTRO_FADE / 2.0).min(INTRO_FADE) / INTRO_FADE).clamp(0.0, 1.0);
+    let global_brightness = intro_fade;
+
     let pixels: Vec<smart_leds::RGB8> = match dust_level {
         DustLevel::TooCloseToSensor | DustLevel::SensorConfused => {
             // Orange white noise
@@ -454,45 +479,61 @@ fn update_led_strip(ws2812: &mut Ws2812Esp32Rmt, dust_level: DustLevel, animatio
             (0..LED_STRIP_NUM_LEDS)
                 .map(|i| {
                     // Simple deterministic noise from tick + position
-                    let hash = (tick.wrapping_mul(31).wrapping_add(i as u32).wrapping_mul(7)) % 256;
-                    let brightness = (hash as f32 / 255.0).powi(2);
+                    let hash = (tick
+                        .wrapping_mul(1237)
+                        .wrapping_add((i * 7) as u32)
+                        .wrapping_mul(512353))
+                        % 256;
+                    let mut brightness = (hash as f32 / 255.0).powi(2);
+                    brightness *= global_brightness;
+
                     let r = (255.0 * brightness) as u8;
                     let g = (100.0 * brightness) as u8;
                     smart_leds::RGB8::new(r, g, 0)
                 })
                 .collect()
         }
-        DustLevel::CartPresentNotLoaded | DustLevel::NoCart => {
-            // Every third LED orange, animating forward
-            let offset = (animation_time * 3.0) as usize % 3;
-            (0..LED_STRIP_NUM_LEDS)
-                .map(|i| {
-                    if (i + offset) % 3 == 0 {
-                        smart_leds::RGB8::new(255, 100, 0)
-                    } else {
-                        smart_leds::RGB8::new(0, 0, 0)
-                    }
-                })
-                .collect()
-        }
+        DustLevel::CartPresentNotLoaded | DustLevel::NoCart => (0..LED_STRIP_NUM_LEDS)
+            .map(|i| {
+                let mut x = (((i as f32) - (animation_time * MOVING_ARROWS_SPEED))
+                    % MOVING_ARROWS_LENGTH)
+                    / MOVING_ARROWS_LENGTH;
+                if x < 0.0 {
+                    x += 1.0;
+                }
+
+                let brightness = x.powi(2) * global_brightness;
+                let r = (255.0 * brightness) as u8;
+                let g = (100.0 * brightness) as u8;
+                smart_leds::RGB8::new(r, g, 0)
+            })
+            .collect(),
         DustLevel::Valid(value) => {
-            let value = value.into_inner();
-            let lit_count = (value * LED_STRIP_NUM_LEDS as f32).round() as usize;
+            let value = value.into_inner() * ease_out_cubic(intro_fade_staggered);
+            let lit_count = value * LED_STRIP_NUM_LEDS as f32;
             let warning_led =
                 (DUST_LEVEL_WARNING_THRESHOLD * LED_STRIP_NUM_LEDS as f32).round() as usize;
             let critical_led =
                 (DUST_LEVEL_CRITICAL_THRESHOLD * LED_STRIP_NUM_LEDS as f32).round() as usize;
+            let intro_threshold_led = LED_STRIP_NUM_LEDS as f32 * ease_out_cubic(intro_fade);
 
             (0..LED_STRIP_NUM_LEDS)
                 .map(|i| {
-                    if i >= lit_count {
-                        smart_leds::RGB8::new(0, 0, 0)
-                    } else if i >= critical_led {
+                    let mut brightness: f32 = (lit_count - i as f32).clamp(0.14, 1.0);
+                    let intro_brightness = (intro_threshold_led - i as f32).clamp(0.0, 1.0);
+                    brightness = (brightness * intro_brightness).powi(2);
+
+                    let col = if i >= critical_led {
                         smart_leds::RGB8::new(255, 0, 0)
                     } else if i >= warning_led {
                         smart_leds::RGB8::new(255, 100, 0)
                     } else {
                         smart_leds::RGB8::new(0, 255, 0)
+                    };
+                    smart_leds::RGB {
+                        r: (col.r as f32 * brightness) as u8,
+                        g: (col.g as f32 * brightness) as u8,
+                        b: (col.b as f32 * brightness) as u8,
                     }
                 })
                 .collect()
@@ -504,26 +545,21 @@ fn update_led_strip(ws2812: &mut Ws2812Esp32Rmt, dust_level: DustLevel, animatio
     }
 }
 
-async fn run_led_animation(
-    mut ws2812: Ws2812Esp32Rmt<'static>,
-    dust_level: Arc<Mutex<DustLevel>>,
-    max_duration: Duration,
-) {
-    let mut animation_time: f32 = 0.0;
-    let mut last_instant = Instant::now();
+async fn run_led_animation(spi_bus: SpiBus<'static>, dust_level: Arc<Mutex<DustLevel>>) {
+    let mut buf = vec![0u8; LED_STRIP_NUM_LEDS * 12 + 140];
+    let mut ws2812 = ws2812_spi::prerendered::Ws2812::new(spi_bus, &mut buf);
+
     let start = Instant::now();
     loop {
-        let now = Instant::now();
-        if now.duration_since(start) >= max_duration {
-            break;
-        }
-        let dt = now.duration_since(last_instant).as_secs_f32();
-        last_instant = now;
-        animation_time += dt * LED_ANIMATION_SPEED;
+        let animation_time = Instant::now().duration_since(start).as_secs_f32();
 
         let level = *dust_level.lock().unwrap();
         update_led_strip(&mut ws2812, level, animation_time);
-        // std::thread::sleep(Duration::from_millis(30));
+        // update_led_strip(
+        //     &mut ws2812,
+        //     DustLevel::Valid(NotNan::new(0.75).unwrap()),
+        //     animation_time,
+        // );
         tokio::time::sleep(Duration::from_millis(30)).await;
     }
 }
@@ -554,8 +590,9 @@ async fn async_main() -> Result<(), EspError> {
     let multiplexer1_selector_pin_2 = peripherals.pins.gpio19;
 
     let multiplexer2_data_pin = peripherals.pins.gpio17;
-    let led_strip_pin = peripherals.pins.gpio33;
-    let led_strip_rmt_channel = peripherals.rmt.channel0;
+    let led_strip_mosi_pin = peripherals.pins.gpio33;
+    let led_strip_sclk_pin = peripherals.pins.gpio22;
+    let led_strip_spi = peripherals.spi2;
 
     let multiplexer2_selector_pin_0 = peripherals.pins.gpio0;
     let multiplexer2_selector_pin_1 = peripherals.pins.gpio4;
@@ -666,43 +703,39 @@ async fn async_main() -> Result<(), EspError> {
         indicator_sound_pin,
     )?);
 
-    debug_led.blink(4, Duration::from_millis(50)).await?;
-    indicator_red.blink(2, Duration::from_millis(100)).await?;
-    indicator_yellow
-        .blink(2, Duration::from_millis(100))
-        .await?;
-    indicator_green.blink(2, Duration::from_millis(100)).await?;
-    indicator_sound.blink(2, Duration::from_millis(100)).await?;
+    let mut blink_leds = async || {
+        debug_led.blink(4, Duration::from_millis(50)).await?;
+        indicator_red.blink(2, Duration::from_millis(100)).await?;
+        indicator_yellow
+            .blink(2, Duration::from_millis(100))
+            .await?;
+        indicator_green.blink(2, Duration::from_millis(100)).await?;
+        indicator_sound.blink(2, Duration::from_millis(100)).await?;
+        Ok(())
+    };
 
-    let mut ws2812 = match create_led_strip(led_strip_rmt_channel, led_strip_pin) {
-        Ok(ws2812) => {
-            info!("LED strip initialized.");
-            Some(ws2812)
+    let spi_bus = match create_spi_bus(led_strip_spi, led_strip_sclk_pin, led_strip_mosi_pin) {
+        Ok(spi_bus) => {
+            info!("LED strip SPI bus initialized.");
+            Some(spi_bus)
         }
         Err(e) => {
-            error!("Failed to initialize LED strip: {:?}", e);
+            error!("Failed to initialize LED strip SPI bus: {:?}", e);
             None
         }
     };
 
-    if let Some(ref mut ws) = ws2812 {
-        info!("Running LED strip test pattern...");
-        match run_led_test_pattern(ws) {
-            Ok(()) => info!("LED strip test pattern complete."),
-            Err(e) => error!("LED strip test pattern failed: {:?}", e),
-        }
-    }
-
     let shared_dust_level = Arc::new(Mutex::new(DustLevel::SensorConfused));
 
-    let mac = start_wifi(
+    let wifi_task = start_wifi(
         peripherals.modem,
         sys_loop.clone(),
         nvs,
         timer_service.clone(),
         is_wokwi_simulator,
-    )
-    .await;
+    );
+
+    let (mac, _) = tokio::try_join!(wifi_task, blink_leds())?;
 
     // Convert mac to string
     let mac_str = format!(
@@ -712,11 +745,6 @@ async fn async_main() -> Result<(), EspError> {
 
     let device_id = format!("{MQTT_CLIENT_ID} {mac_str}");
     info!("Device ID: {}", device_id);
-
-    if let Some(ws) = ws2812 {
-        let shared_dust_level_for_animation = shared_dust_level.clone();
-        run_led_animation(ws, shared_dust_level_for_animation, Duration::from_secs(30)).await;
-    }
 
     // Initialize brevduva storage
     // This will connect to an MQTT broker
@@ -1171,31 +1199,25 @@ async fn async_main() -> Result<(), EspError> {
         Ok(())
     };
 
-    // Run LED animation on core 1 in its own thread
-    // if let Some(ws) = ws2812 {
-    //     use esp_idf_svc::hal::task::thread::ThreadSpawnConfiguration;
-    //     ThreadSpawnConfiguration {
-    //         pin_to_core: Some(esp_idf_svc::hal::cpu::Core::Core1),
-    //         stack_size: 4096,
-    //         priority: 15,
-    //         ..Default::default()
-    //     }
-    //     .set()
-    //     .unwrap();
-
-    //     std::thread::spawn(move || run_led_animation(ws, shared_dust_level_for_animation));
-
-    //     // Reset to default so subsequent threads aren't pinned
-    //     ThreadSpawnConfiguration::default().set().unwrap();
-    // }
+    let led_animation = async {
+        if let Some(spi) = spi_bus {
+            run_led_animation(spi, shared_dust_level_for_animation).await;
+        }
+        Result::<(), EspError>::Ok(())
+    };
 
     // Run tasks concurrently (but not in parallel)
     // This allows the machine's power to still be controlled even
     // if sending alert messages takes a long time due to spotty wifi or similar.
     if SEND_ALERT_MESSAGES {
-        tokio::try_join!(send_alart_messages, monitor_sensors_and_control_power,).unwrap();
+        tokio::try_join!(
+            send_alart_messages,
+            monitor_sensors_and_control_power,
+            led_animation,
+        )
+        .unwrap();
     } else {
-        monitor_sensors_and_control_power.await.unwrap();
+        tokio::try_join!(monitor_sensors_and_control_power, led_animation,).unwrap();
     }
     Ok(())
 }

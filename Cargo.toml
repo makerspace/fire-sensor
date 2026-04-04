@@ -41,7 +41,7 @@ thiserror = "2.0"
 serde = { version = "*", features = ["derive"] }
 tokio = { version = "1", features = ["rt", "macros", "time"] }
 embassy-futures = "0.1"
-brevduva = { git = "https://github.com/HalfVoxel/brevduva", rev = "88c0166", features = [
+brevduva = { git = "https://github.com/HalfVoxel/brevduva", rev = "11e5e83", features = [
     "embedded",
 ] }
 #brevduva = { path = "../brevduva", features = [
@@ -49,7 +49,7 @@ brevduva = { git = "https://github.com/HalfVoxel/brevduva", rev = "88c0166", fea
 #] }
 ordered-float = { version = "5.1", features = ["serde"] }
 embedded-svc = { version = "0.28", default-features = false, features = ["std", "log"] }
-ota_flasher = { git = "https://github.com/HalfVoxel/ota_flasher", rev = "6afc5c9", features = ["embedded"] }
+ota_flasher = { git = "https://github.com/HalfVoxel/ota_flasher", rev = "ae67749", features = ["embedded"] }
 # ota_flasher = { path = "../ota_flasher", features = ["embedded"] }
 chrono = { version = "0.4", features = ["serde"] }
 embedded-hal = "1.0.0"

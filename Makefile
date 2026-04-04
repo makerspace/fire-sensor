@@ -13,3 +13,4 @@ flash:
 ota: tools/bin/brevduva_ota_upload
 	cargo espflash save-image --chip esp32 --flash-size 4mb --partition-table ./partitions.csv --release target/xtensa-esp32-espidf/release/firmware.bin
 	RUST_LOG=info ./tools/bin/brevduva_ota_upload upload --device "dust_collector b0:cb:d8:e5:fa:bd" --image target/xtensa-esp32-espidf/release/firmware.bin --version-file target/xtensa-esp32-espidf/release/build_id
+	

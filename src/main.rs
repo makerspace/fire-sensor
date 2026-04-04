@@ -55,8 +55,8 @@ const DISTANCE_MIN: i32 = 250; // 250-
 const DISTANCE_MAX: i32 = DISTANCE_CART_NOT_LOADED; // 1160-
                                                     // const DISTANCE_CART_NO_BAG_LOADED: i32 = 1170; // 1170+
 const DISTANCE_CART_NOT_LOADED: i32 = 1180; // 1210+
-const DISTANCE_NO_CART: i32 = 1350; // 1350+
-const DISTANCE_NO_VALUE: i32 = 1700; // 1700+
+const DISTANCE_NO_CART: i32 = 1290; // 1350+
+const DISTANCE_NO_VALUE: i32 = 1600; // 1700+
 
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Serialize, Deserialize)]
 enum DustLevel {
@@ -409,10 +409,10 @@ async fn maybe_enter_safe_mode(debug_led: &mut DebugLed, status_channel: &Channe
         }
     }
 }
-const LED_STRIP_NUM_LEDS: usize = 60;
+const LED_STRIP_NUM_LEDS: usize = 44;
 
 type SpiBus<'d> = esp_idf_svc::hal::spi::SpiBusDriver<'d, esp_idf_svc::hal::spi::SpiDriver<'d>>;
-const DUST_LEVEL_WARNING_THRESHOLD: f32 = 0.6;
+const DUST_LEVEL_WARNING_THRESHOLD: f32 = 0.65;
 const DUST_LEVEL_CRITICAL_THRESHOLD: f32 = 0.8;
 
 fn create_spi_bus<'d>(
@@ -462,8 +462,12 @@ fn ease_out_cubic(x: f32) -> f32 {
     1.0 - (1.0 - x).powi(3)
 }
 
-fn update_led_strip<W: SmartLedsWrite>(ws2812: &mut W, dust_level: DustLevel, animation_time: f32)
-where
+fn update_led_strip<W: SmartLedsWrite>(
+    ws2812: &mut W,
+    pixels: &mut [smart_leds::RGB8; LED_STRIP_NUM_LEDS],
+    dust_level: DustLevel,
+    animation_time: f32,
+) where
     W::Color: From<smart_leds::RGB8>,
     W::Error: Debug,
 {
@@ -472,22 +476,20 @@ where
         ((animation_time - INTRO_FADE / 2.0).min(INTRO_FADE) / INTRO_FADE).clamp(0.0, 1.0);
     let global_brightness = intro_fade;
 
-    let pixels: Vec<smart_leds::RGB8> = match dust_level {
+    match dust_level {
         DustLevel::TooCloseToSensor | DustLevel::SensorConfused => {
             // Orange white noise
             let tick = (animation_time * 1.0) as u32;
-            (0..LED_STRIP_NUM_LEDS)
-                .map(|i| {
-                    // Simple deterministic noise from tick + position
-                    let hash = (i as u32 + tick) % 2;
-                    let mut brightness = hash as f32;
-                    brightness *= global_brightness;
+            for (i, pixel) in pixels.iter_mut().enumerate() {
+                // Simple deterministic noise from tick + position
+                let hash = (i as u32 + tick) % 2;
+                let mut brightness = hash as f32;
+                brightness *= global_brightness;
 
-                    let r = (255.0 * brightness) as u8;
-                    let g = (100.0 * brightness) as u8;
-                    smart_leds::RGB8::new(r, g, 0)
-                })
-                .collect()
+                let r = (255.0 * brightness) as u8;
+                let g = (100.0 * brightness) as u8;
+                *pixel = smart_leds::RGB8::new(r, g, 0);
+            }
 
             // (0..LED_STRIP_NUM_LEDS)
             //     .map(|i| {
@@ -504,10 +506,9 @@ where
             //         let g = (100.0 * brightness) as u8;
             //         smart_leds::RGB8::new(r, g, 0)
             //     })
-            //     .collect()
         }
-        DustLevel::CartPresentNotLoaded | DustLevel::NoCart => (0..LED_STRIP_NUM_LEDS)
-            .map(|i| {
+        DustLevel::CartPresentNotLoaded | DustLevel::NoCart => {
+            for (i, pixel) in pixels.iter_mut().enumerate() {
                 let mut x = (((i as f32) - (animation_time * MOVING_ARROWS_SPEED))
                     % MOVING_ARROWS_LENGTH)
                     / MOVING_ARROWS_LENGTH;
@@ -518,9 +519,9 @@ where
                 let brightness = x.powi(2) * global_brightness;
                 let r = (255.0 * brightness) as u8;
                 let g = (100.0 * brightness) as u8;
-                smart_leds::RGB8::new(r, g, 0)
-            })
-            .collect(),
+                *pixel = smart_leds::RGB8::new(r, g, 0);
+            }
+        }
         DustLevel::Valid(value) => {
             let value = value.into_inner() * ease_out_cubic(intro_fade_staggered);
             let lit_count = value * LED_STRIP_NUM_LEDS as f32;
@@ -530,30 +531,28 @@ where
                 (DUST_LEVEL_CRITICAL_THRESHOLD * LED_STRIP_NUM_LEDS as f32).round() as usize;
             let intro_threshold_led = LED_STRIP_NUM_LEDS as f32 * ease_out_cubic(intro_fade);
 
-            (0..LED_STRIP_NUM_LEDS)
-                .map(|i| {
-                    let mut brightness: f32 = (lit_count - i as f32).clamp(0.14, 1.0);
-                    let intro_brightness = (intro_threshold_led - i as f32).clamp(0.0, 1.0);
-                    brightness = (brightness * intro_brightness).powi(2);
+            for (i, pixel) in pixels.iter_mut().enumerate() {
+                let mut brightness: f32 = (lit_count - i as f32).clamp(0.14, 1.0);
+                let intro_brightness = (intro_threshold_led - i as f32).clamp(0.0, 1.0);
+                brightness = (brightness * intro_brightness).powi(2);
 
-                    let col = if i >= critical_led {
-                        smart_leds::RGB8::new(255, 0, 0)
-                    } else if i >= warning_led {
-                        smart_leds::RGB8::new(255, 100, 0)
-                    } else {
-                        smart_leds::RGB8::new(0, 255, 0)
-                    };
-                    smart_leds::RGB {
-                        r: (col.r as f32 * brightness) as u8,
-                        g: (col.g as f32 * brightness) as u8,
-                        b: (col.b as f32 * brightness) as u8,
-                    }
-                })
-                .collect()
+                let col = if i >= critical_led {
+                    smart_leds::RGB8::new(255, 0, 0)
+                } else if i >= warning_led {
+                    smart_leds::RGB8::new(255, 100, 0)
+                } else {
+                    smart_leds::RGB8::new(0, 255, 0)
+                };
+                *pixel = smart_leds::RGB {
+                    r: (col.r as f32 * brightness) as u8,
+                    g: (col.g as f32 * brightness) as u8,
+                    b: (col.b as f32 * brightness) as u8,
+                };
+            }
         }
     };
 
-    if let Err(e) = ws2812.write(pixels.into_iter()) {
+    if let Err(e) = ws2812.write(pixels.iter().copied().rev()) {
         error!("Failed to update LED strip: {:?}", e);
     }
 }
@@ -561,13 +560,14 @@ where
 async fn run_led_animation(spi_bus: SpiBus<'static>, dust_level: Arc<Mutex<DustLevel>>) {
     let mut buf = vec![0u8; LED_STRIP_NUM_LEDS * 12 + 140];
     let mut ws2812 = ws2812_spi::prerendered::Ws2812::new(spi_bus, &mut buf);
+    let mut pixels = [smart_leds::RGB8::default(); LED_STRIP_NUM_LEDS];
 
     let start = Instant::now();
     loop {
         let animation_time = Instant::now().duration_since(start).as_secs_f32();
 
         let level = *dust_level.lock().unwrap();
-        update_led_strip(&mut ws2812, level, animation_time);
+        update_led_strip(&mut ws2812, &mut pixels, level, animation_time);
         // update_led_strip(
         //     &mut ws2812,
         //     DustLevel::Valid(NotNan::new(0.75).unwrap()),
@@ -1015,7 +1015,6 @@ async fn async_main() -> Result<(), EspError> {
             let dt = t.duration_since(last_t);
             last_t = t;
             info!("Loop dt: {:?}", dt);
-            info!("Reading sensors...");
             let temperature = temperature_sensor
                 .as_mut()
                 .and_then(|s| s.measure().map(|v| v as f32 / 16.0));
@@ -1104,15 +1103,17 @@ async fn async_main() -> Result<(), EspError> {
                 }
             }
 
-            let powered_off_due_to_dust_level = match dust_level_normalized {
-                DustLevel::NoCart | DustLevel::CartPresentNotLoaded => true,
-                DustLevel::Valid(x) if x > NotNan::new(DUST_LEVEL_CRITICAL_THRESHOLD).unwrap() => {
-                    true
-                }
-                DustLevel::SensorConfused | DustLevel::TooCloseToSensor | DustLevel::Valid(_) => {
-                    false
-                }
-            };
+            // let powered_off_due_to_dust_level = match dust_level_normalized {
+            //     DustLevel::NoCart | DustLevel::CartPresentNotLoaded => true,
+            //     DustLevel::Valid(x) if x > NotNan::new(DUST_LEVEL_CRITICAL_THRESHOLD).unwrap() => {
+            //         true
+            //     }
+            //     DustLevel::SensorConfused | DustLevel::TooCloseToSensor | DustLevel::Valid(_) => {
+            //         false
+            //     }
+            // };
+            // Was too unreliable
+            let powered_off_due_to_dust_level = false;
 
             let any_gate_open = gates_open
                 .iter()
@@ -1124,7 +1125,9 @@ async fn async_main() -> Result<(), EspError> {
             }
 
             for (i, &gate) in gates_open.iter().enumerate() {
-                info!("Gate {}: {}", i + 1, if gate { "open" } else { "closed" });
+                if gate {
+                    info!("Gate {}: {}", i + 1, if gate { "open" } else { "closed" });
+                }
             }
 
             // Delay turning on the machine after opening gates.
@@ -1201,7 +1204,7 @@ async fn async_main() -> Result<(), EspError> {
             }
 
             // Control power to the machine.
-            info!("Setting power controller to {:?}", level);
+            // info!("Setting power controller to {:?}", level);
             power_controller_driver.set_level(level)?;
             debug_led.set_duty(if level == Level::High { 1.0 } else { 0.0 })?;
 
